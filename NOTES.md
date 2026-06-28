@@ -341,3 +341,48 @@ Verification: node --check OK; per-stage flood timing 65-82s all 5; bricks,
 fairness (same 45 deg launch, separated, trails), pure-physics (no rotation,
 constant 140 speed, reflection-only, knife single-use, 4 placed, settles in cap)
 all PASS. Snapshot re-rendered (snapshot.jpg) with the wider 9-wide corridors.
+
+## UPDATE — remove ALL grid lines + perfect-square cells (this session)
+
+User: (1) remove every grid/tile/cell line — floor one solid flat color, walls
+solid dark blocks with no cell borders, squares plain solid (no internal
+lines/texture), flood one solid color, nothing reveals the grid; (2) cells must
+be PERFECT SQUARES (size = screenWidth/cols for both W and H), maze need not
+fill screen height — center it and fill leftover space with background color;
+never stretch cells to rectangles.
+
+Done:
+1. **Perfect square cells** — `layoutMaze` now sets `cell = view.w/cols` and uses
+   it for BOTH cellW and cellH. Maze centered vertically via `MAZE.offY =
+   (view.h - cell*rows)/2`; `offX=0`. Verified: cellW==cellH==43.33 on all 5
+   stages (/tmp/aspect.js). The leftover top/bottom space is the letterbox.
+   - Introduced real offsets: every pixel<->cell conversion now uses offX/offY
+     (`cellCenter`, `isWallAtPixel`, `isWallForSquare`, `squarePathIndex`,
+     `tryBreakBrick`, `spawnBrickShards`, wall rects, draw fns). Pixels outside
+     the maze area read as wall, and the move clamp keeps squares within the
+     maze bounds (not the full screen).
+2. **All grid/cell lines removed** — flat solid color everywhere:
+   - `BG_COLOR #cdd6e3` (letterbox), `FLOOR_COLOR #e9edf2` (solid floor, no
+     checker), `WALL_COLOR #2b2f44` (solid blocks, +1px overlap so adjacent
+     wall cells MERGE with no seams/bevels/highlights), `FLOOD_COLOR #3b32a6`
+     (solid, +1px overlap, no per-cell sheen; keeps the smooth fractional
+     leading face + one soft glow band, which is an advance edge, not a grid).
+   - Bricks: solid flat color block (no mortar/running-bond/bevel) + one soft
+     glowing colored rim so you can still read which color may pass.
+   - Squares: PLAIN SOLID color (removed body gradient, radial specular
+     highlight, and top rim line) + one clean outer outline + drop shadow +
+     outer glow. No internal lines/texture.
+   - ZERO createLinearGradient/createRadialGradient calls remain in the file.
+   - The checkered finish flag is kept (explicit earlier request; it's a finish
+     icon, not the maze grid).
+3. **Taller mazes** so square cells fill most of the portrait screen: rebuilt
+   MAZE_LAYOUTS to 9x17 (mazes 1-3, ~107px letterbox total) and 9x19 (mazes
+   4-5, ~21px). All validated single-path (S->E, no branching, all cells on
+   path). Maze 3 horizontally mirrored to differ from maze 1.
+
+Verification: node --check OK; JSON/YAML OK; square cells YES all 5; flood
+timing ~80s all 5 (under 120s cap); bricks, fairness, pure-physics all PASS
+(test harness /tmp/bricks.js updated to add offX/offY to its pixel math). Brick
+count is now ~10/stage (longer paths). Snapshot re-rendered (snapshot.jpg):
+solid flat floor/walls/flood/bricks, plain solid squares, square cells,
+centered maze with background letterbox.

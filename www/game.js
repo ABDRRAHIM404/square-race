@@ -275,6 +275,11 @@
     yellow: '#FFD700', blue: '#4169E1', green: '#228B22', red: '#CC0000'
   };
   const COLOR_ORDER = ['yellow', 'blue', 'green', 'red'];
+  // Flat solid game colors — NO gradients/checker/grid so nothing reveals cells.
+  const BG_COLOR = '#cdd6e3';    // letterbox background (above/below the maze)
+  const FLOOR_COLOR = '#e9edf2'; // solid corridor floor
+  const WALL_COLOR = '#2b2f44';  // solid wall blocks
+  const FLOOD_COLOR = '#3b32a6'; // solid advancing flood wall
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
   // Speeds reduced 30% from the original tuning so motion is easy to follow.
   // Per-color base speeds (already 30% reduced earlier, now a further 20% slower).
@@ -296,10 +301,11 @@
    * degree >= 3; exactly two degree-1 endpoints: S and E).
    * ========================================================= */
   const MAZE_LAYOUTS = [
-    // Maze grid is intentionally SMALL (9 wide) so each cell is large and the
-    // open corridor/floor reads about 3x wider than before. Corridors stay a
-    // single cell wide (single-path) so the flood wall + path logic still work.
-    // 1 — horizontal serpentine (wide switchback corridor)
+    // Maze grid is 9 wide so cells are large (wide floor). Cells are rendered as
+    // PERFECT SQUARES (size = screenWidth/9) and the maze is taller now so it
+    // fills most of the portrait screen; any leftover space is the centered,
+    // background-colored letterbox. All 5 are validated single-path (S->E).
+    // 1 — horizontal serpentine (9x17)
     [
       '#########',
       '#S......#',
@@ -307,44 +313,6 @@
       '#.......#',
       '#.#######',
       '#.......#',
-      '#######.#',
-      '#.......#',
-      '#.#######',
-      '#......E#',
-      '#########'
-    ],
-    // 2 — vertical serpentine (weaving lanes)
-    [
-      '#########',
-      '#S#...#E#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#.#.#.#.#',
-      '#...#...#',
-      '#########'
-    ],
-    // 3 — horizontal serpentine, flipped (start bottom, exit top)
-    [
-      '#########',
-      '#......E#',
-      '#.#######',
-      '#.......#',
-      '#######.#',
-      '#.......#',
-      '#.#######',
-      '#.......#',
-      '#######.#',
-      '#S......#',
-      '#########'
-    ],
-    // 4 — longer horizontal serpentine (extra switchbacks)
-    [
-      '#########',
-      '#S......#',
       '#######.#',
       '#.......#',
       '#.#######',
@@ -357,10 +325,78 @@
       '#E......#',
       '#########'
     ],
-    // 5 — longer vertical serpentine (taller weaving lanes)
+    // 2 — vertical weaving lanes (9x17)
     [
       '#########',
       '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#...#...#',
+      '#########'
+    ],
+    // 3 — horizontal serpentine, mirrored (start top-right)
+    [
+      '#########',
+      '#......S#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#......E#',
+      '#########'
+    ],
+    // 4 — longer horizontal serpentine (9x19)
+    [
+      '#########',
+      '#S......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#......E#',
+      '#########'
+    ],
+    // 5 — longer vertical weaving lanes (9x19)
+    [
+      '#########',
+      '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
       '#.#.#.#.#',
       '#.#.#.#.#',
       '#.#.#.#.#',
@@ -426,10 +462,14 @@
 
   // Compute pixel geometry so the maze fills the whole screen.
   function layoutMaze() {
-    MAZE.cellW = view.w / MAZE.cols;
-    MAZE.cellH = view.h / MAZE.rows;
+    // PERFECT SQUARE CELLS: size = screen width / columns, used for BOTH width
+    // and height. The maze will not fill the full screen height; the leftover
+    // space above and below is centered and filled with the background color.
+    const cell = view.w / MAZE.cols;
+    MAZE.cellW = cell;
+    MAZE.cellH = cell;
     MAZE.offX = 0;
-    MAZE.offY = 0;
+    MAZE.offY = Math.max(0, (view.h - cell * MAZE.rows) / 2); // vertical centering
 
     MAZE.walls = [];
     let startCell = null, exitCell = null;
@@ -438,7 +478,7 @@
         const ch = MAZE.grid[r][c];
         if (ch === '#') {
           MAZE.walls.push({
-            x: c * MAZE.cellW, y: r * MAZE.cellH,
+            x: MAZE.offX + c * MAZE.cellW, y: MAZE.offY + r * MAZE.cellH,
             w: MAZE.cellW, h: MAZE.cellH
           });
         } else if (ch === 'S') {
@@ -457,19 +497,18 @@
       MAZE.exit = cellCenter(exitCell.c, exitCell.r);
     }
     MAZE.path = computePath();
-    MAZE._floorGrad = null; // rebuilt on next draw (handles resize)
   }
 
   function cellCenter(c, r) {
-    return { x: c * MAZE.cellW + MAZE.cellW / 2, y: r * MAZE.cellH + MAZE.cellH / 2 };
+    return { x: MAZE.offX + c * MAZE.cellW + MAZE.cellW / 2, y: MAZE.offY + r * MAZE.cellH + MAZE.cellH / 2 };
   }
 
   // Is the cell containing a pixel point a wall?
   // A cell is a wall if it's a layout wall ('#') OR it has been sealed by the
   // advancing blue flood wall behind the squares.
   function isWallAtPixel(px, py) {
-    const c = Math.floor(px / MAZE.cellW);
-    const r = Math.floor(py / MAZE.cellH);
+    const c = Math.floor((px - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((py - MAZE.offY) / MAZE.cellH);
     if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
     if (MAZE.grid[r][c] === '#') return true;
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
@@ -481,8 +520,8 @@
   // the one whose color matches (that square is allowed to enter, which breaks
   // the brick). This is what makes break_match bricks act as colored gates.
   function isWallForSquare(px, py, sq) {
-    const c = Math.floor(px / MAZE.cellW);
-    const r = Math.floor(py / MAZE.cellH);
+    const c = Math.floor((px - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((py - MAZE.offY) / MAZE.cellH);
     if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
     if (MAZE.grid[r][c] === '#') return true;
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
@@ -493,8 +532,8 @@
 
   // If the square is overlapping a brick of its OWN color, shatter it open.
   function tryBreakBrick(sq) {
-    const c = Math.floor(sq.x / MAZE.cellW);
-    const r = Math.floor(sq.y / MAZE.cellH);
+    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
     const brick = brickAt(c, r);
     if (brick && brick.color === sq.color) {
       brick.broken = true;
@@ -580,8 +619,8 @@
 
   // Path index of the cell a square currently occupies (-1 if off-path).
   function squarePathIndex(sq) {
-    const c = Math.floor(sq.x / MAZE.cellW);
-    const r = Math.floor(sq.y / MAZE.cellH);
+    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
     for (let i = 0; i < MAZE.path.length; i++) {
       if (MAZE.path[i].c === c && MAZE.path[i].r === r) return i;
     }
@@ -648,71 +687,48 @@
   function drawFlood() {
     if (!MAZE.path.length) return;
     const w = MAZE.cellW, h = MAZE.cellH;
+    const ox = MAZE.offX, oy = MAZE.offY;
     const t = Date.now();
 
-    // Vertical indigo gradient reused for the whole flood body (rich, glossy).
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#5b4fd6');
-    grad.addColorStop(0.5, '#3b32a6');
-    grad.addColorStop(1, '#241d73');
-
-    // 1) Fully sealed cells: smooth indigo body with a subtle top sheen.
+    // 1) Sealed body: ONE solid flat indigo color, no per-cell grid/sheen.
+    //    +1px overlap so sealed cells merge into a single seamless shape.
+    ctx.fillStyle = FLOOD_COLOR;
     for (let i = 0; i < FLOOD.front; i++) {
       const cell = MAZE.path[i];
       if (!cell) continue;
-      const x = cell.c * w, y = cell.r * h;
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w + 0.5, h + 0.5);
-      ctx.restore();
-      // top sheen + soft inner border for depth
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      ctx.fillRect(x, y, w, Math.max(2, h * 0.12));
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(x, y + h - Math.max(2, h * 0.10), w, Math.max(2, h * 0.10));
+      ctx.fillRect(ox + cell.c * w, oy + cell.r * h, w + 1, h + 1);
     }
 
     // 2) Continuous leading FACE: partially fill the current cell by the
-    //    fractional progress so the wall advances like rising liquid, not steps.
+    //    fractional progress so the wall advances smoothly (not cell-by-cell).
     const frac = FLOOD.progress - Math.floor(FLOOD.progress);
     const lead = MAZE.path[FLOOD.front];
     const next = MAZE.path[Math.min(FLOOD.front + 1, MAZE.path.length - 1)];
     if (lead) {
-      const x = lead.c * w, y = lead.r * h;
-      ctx.save();
-      ctx.translate(x, y);
-      fillCellFractionLocal(next ? { c: next.c - lead.c, r: next.r - lead.r } : null, frac, grad, w, h);
-      ctx.restore();
+      const x = ox + lead.c * w, y = oy + lead.r * h;
+      const dx = next ? Math.sign(next.c - lead.c) : 1;
+      const dy = next ? Math.sign(next.r - lead.r) : 0;
+      ctx.fillStyle = FLOOD_COLOR;
+      if (dx > 0)      ctx.fillRect(x, y, w * frac + 1, h + 1);
+      else if (dx < 0) ctx.fillRect(x + w * (1 - frac), y, w * frac + 1, h + 1);
+      else if (dy > 0) ctx.fillRect(x, y, w + 1, h * frac + 1);
+      else if (dy < 0) ctx.fillRect(x, y + h * (1 - frac), w + 1, h * frac + 1);
+      else             ctx.fillRect(x, y, w * frac + 1, h + 1);
 
-      // Glowing energy edge riding the advancing face.
+      // Soft glowing leading edge so the advance reads (a single band, no grid).
       const pulse = 0.55 + 0.45 * Math.sin(t / 220);
-      let dx = next ? Math.sign(next.c - lead.c) : 1;
-      let dy = next ? Math.sign(next.r - lead.r) : 0;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(140,130,255,${0.18 + 0.18 * pulse})`;
-      const eThick = Math.max(w, h) * 0.22 * (0.8 + 0.4 * pulse);
-      if (dx > 0)       ctx.fillRect(x + w * frac - eThick, y, eThick, h);
-      else if (dx < 0)  ctx.fillRect(x + w * (1 - frac), y, eThick, h);
-      else if (dy > 0)  ctx.fillRect(x, y + h * frac - eThick, w, eThick);
-      else if (dy < 0)  ctx.fillRect(x, y + h * (1 - frac), w, eThick);
+      ctx.fillStyle = `rgba(140,130,255,${0.16 + 0.16 * pulse})`;
+      const eT = Math.max(w, h) * 0.18 * (0.8 + 0.4 * pulse);
+      if (dx > 0)      ctx.fillRect(x + w * frac - eT, y, eT, h);
+      else if (dx < 0) ctx.fillRect(x + w * (1 - frac), y, eT, h);
+      else if (dy > 0) ctx.fillRect(x, y + h * frac - eT, w, eT);
+      else if (dy < 0) ctx.fillRect(x, y + h * (1 - frac), w, eT);
       ctx.restore();
     }
   }
 
-  // Local-space variant of fillCellFraction (origin already translated to cell).
-  function fillCellFractionLocal(dir, frac, fillStyle, w, h) {
-    frac = Math.max(0, Math.min(1, frac));
-    const dx = dir ? Math.sign(dir.c) : 0;
-    const dy = dir ? Math.sign(dir.r) : 0;
-    ctx.fillStyle = fillStyle;
-    if (dx > 0)      ctx.fillRect(0, 0, w * frac + 0.5, h + 0.5);
-    else if (dx < 0) ctx.fillRect(w * (1 - frac), 0, w * frac + 0.5, h + 0.5);
-    else if (dy > 0) ctx.fillRect(0, 0, w + 0.5, h * frac + 0.5);
-    else if (dy < 0) ctx.fillRect(0, h * (1 - frac), w + 0.5, h * frac + 0.5);
-    else             ctx.fillRect(0, 0, w * frac + 0.5, h + 0.5);
-  }
 
   // Visual-effect tuning.
   const SHIELD_FLASH_TIME = 0.5; // seconds for the blue shield ripple
@@ -744,8 +760,8 @@
 
   // Burst brick-colored shards when a matching square smashes its brick.
   function spawnBrickShards(brick) {
-    const cx = brick.c * MAZE.cellW + MAZE.cellW / 2;
-    const cy = brick.r * MAZE.cellH + MAZE.cellH / 2;
+    const cx = MAZE.offX + brick.c * MAZE.cellW + MAZE.cellW / 2;
+    const cy = MAZE.offY + brick.r * MAZE.cellH + MAZE.cellH / 2;
     const col = COLORS[brick.color];
     for (let i = 0; i < 10; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -932,8 +948,9 @@
 
     // Safety clamp to keep the square on-screen (the border is solid wall, so
     // this only guards against numerical drift — it does NOT change vx/vy).
-    sq.x = Math.max(half, Math.min(view.w - half, sq.x));
-    sq.y = Math.max(half, Math.min(view.h - half, sq.y));
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
+    sq.x = Math.max(MAZE.offX + half, Math.min(MAZE.offX + mazeW - half, sq.x));
+    sq.y = Math.max(MAZE.offY + half, Math.min(MAZE.offY + mazeH - half, sq.y));
   }
 
   let _bounceCooldown = 0;
@@ -1052,10 +1069,10 @@
     ctx.translate(sq.x, sq.y);
     ctx.rotate(sq.angle);
 
-    const r = 5; // rounded corners for a glossier look
+    const r = 4; // slightly rounded corners
     const base = COLORS[sq.color];
 
-    // Drop shadow beneath the body for lift off the floor.
+    // Drop shadow beneath the body for lift off the floor (not an internal line).
     if (!sq.eliminated) {
       ctx.save();
       ctx.globalAlpha = sq.opacity * 0.30;
@@ -1066,36 +1083,17 @@
 
     // Outer glow — strong for the player, soft for everyone else.
     ctx.shadowColor = base;
-    ctx.shadowBlur = (sq.isPlayer && !sq.eliminated) ? 18 : 8;
+    ctx.shadowBlur = (sq.isPlayer && !sq.eliminated) ? 16 : 6;
 
-    // Body: vertical gradient from a lighter tint down to a darker shade.
-    const lg = ctx.createLinearGradient(0, -half, 0, half);
-    lg.addColorStop(0, shade(base, 0.45));   // bright top
-    lg.addColorStop(0.5, base);
-    lg.addColorStop(1, shade(base, -0.32));  // dark bottom
-    ctx.fillStyle = lg;
+    // PLAIN SOLID body — one flat color, no gradient, no highlight, no internal
+    // lines or grid texture.
+    ctx.fillStyle = base;
     roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Glassy specular highlight: a soft radial sheen near the top-left.
-    const rg = ctx.createRadialGradient(-half * 0.35, -half * 0.45, 1, -half * 0.35, -half * 0.45, SQUARE_SIZE * 0.8);
-    rg.addColorStop(0, 'rgba(255,255,255,0.85)');
-    rg.addColorStop(0.35, 'rgba(255,255,255,0.25)');
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = rg;
-    roundRect(-half + 1.5, -half + 1.5, SQUARE_SIZE - 3, SQUARE_SIZE * 0.55, r - 1); ctx.fill();
-
-    // Bright top edge line (rim light).
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-half + r, -half + 0.6);
-    ctx.lineTo(half - r, -half + 0.6);
-    ctx.stroke();
-
-    // Crisp dark outline.
-    ctx.strokeStyle = shade(base, -0.55);
-    ctx.lineWidth = 1.6;
+    // A single clean dark outline for definition (an outer edge, not internal).
+    ctx.strokeStyle = shade(base, -0.5);
+    ctx.lineWidth = 1.5;
     roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.stroke();
     ctx.restore();
 
@@ -1257,64 +1255,39 @@
    * MAZE RENDERING (fills the whole screen)
    * ========================================================= */
   function drawMaze() {
-    // Soft vertical gradient floor (subtle, premium look) fills the screen.
-    if (!MAZE._floorGrad) {
-      const fg = ctx.createLinearGradient(0, 0, 0, view.h);
-      fg.addColorStop(0, '#eef2f7');
-      fg.addColorStop(1, '#dde4ee');
-      MAZE._floorGrad = fg;
-    }
-    ctx.fillStyle = MAZE._floorGrad;
+    // 1) BACKGROUND: one solid flat color over the whole screen (this also fills
+    //    the empty letterbox space above/below the centered square-cell maze).
+    ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, view.w, view.h);
 
-    // Faint corridor checker for readability (kept — user likes the floor).
-    ctx.fillStyle = 'rgba(60,80,110,0.045)';
-    for (let r = 0; r < MAZE.rows; r++) {
-      for (let c = 0; c < MAZE.cols; c++) {
-        if (MAZE.grid[r][c] !== '#' && (r + c) % 2 === 0) {
-          ctx.fillRect(c * MAZE.cellW, r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
-        }
-      }
-    }
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
 
-    // Walls: drop shadow + beveled gradient body + crisp edges for a 3D slab.
-    const wgrad = ctx.createLinearGradient(0, 0, 0, MAZE.cellH);
-    wgrad.addColorStop(0, '#3a3f5e');
-    wgrad.addColorStop(0.5, '#2b2f44');
-    wgrad.addColorStop(1, '#1d2031');
+    // 2) FLOOR: one solid flat color, covering ONLY the maze area. No checker,
+    //    no grid, no cell lines.
+    ctx.fillStyle = FLOOR_COLOR;
+    ctx.fillRect(MAZE.offX, MAZE.offY, mazeW, mazeH);
+
+    // 3) WALLS: solid dark blocks with NO cell borders, bevels, or highlights.
+    //    Each wall cell is filled with the exact same flat color and no stroke,
+    //    so adjacent wall cells merge into one seamless solid shape.
+    ctx.fillStyle = WALL_COLOR;
     for (const w of MAZE.walls) {
-      // soft contact shadow under the slab
-      ctx.fillStyle = 'rgba(20,24,40,0.22)';
-      ctx.fillRect(w.x + 1.5, w.y + 2.5, w.w, w.h);
-      // gradient body
-      ctx.save();
-      ctx.translate(w.x, w.y);
-      ctx.fillStyle = wgrad;
-      ctx.fillRect(0, 0, w.w + 0.5, w.h + 0.5);
-      ctx.restore();
-      // top bevel highlight
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      ctx.fillRect(w.x, w.y, w.w, Math.max(2, w.h * 0.10));
-      // left bevel highlight
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fillRect(w.x, w.y, Math.max(2, w.w * 0.10), w.h);
-      // bottom/right inner shadow
-      ctx.fillStyle = 'rgba(0,0,0,0.20)';
-      ctx.fillRect(w.x, w.y + w.h - Math.max(2, w.h * 0.10), w.w, Math.max(2, w.h * 0.10));
+      // +1px overlap guarantees no hairline seam shows between adjacent cells.
+      ctx.fillRect(w.x, w.y, w.w + 1, w.h + 1);
     }
 
-    // Entry marker.
+    // Entry marker: a solid translucent tint + label (no grid).
     if (MAZE.start) {
-      ctx.fillStyle = 'rgba(46,204,113,0.30)';
+      ctx.fillStyle = 'rgba(46,204,113,0.28)';
       ctx.fillRect(MAZE.start.x - MAZE.cellW / 2, MAZE.start.y - MAZE.cellH / 2, MAZE.cellW, MAZE.cellH);
       ctx.fillStyle = '#2ecc71';
-      ctx.font = `bold ${Math.min(MAZE.cellW, MAZE.cellH) * 0.5}px monospace`;
+      ctx.font = `bold ${MAZE.cellW * 0.42}px monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('IN', MAZE.start.x, MAZE.start.y);
     }
     // Exit marker: a checkered finish flag filling the exit cell.
     if (MAZE.exitCell) {
-      drawCheckeredFlag(MAZE.exitCell.c * MAZE.cellW, MAZE.exitCell.r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
+      drawCheckeredFlag(MAZE.offX + MAZE.exitCell.c * MAZE.cellW, MAZE.offY + MAZE.exitCell.r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
     }
     ctx.textBaseline = 'alphabetic';
   }
@@ -1344,42 +1317,21 @@
       if (b.broken) { if (b.hitFlash > 0) b.hitFlash = Math.max(0, b.hitFlash - 0.05); continue; }
       // Skip if the flood has already swallowed this cell (flood draws over it).
       if (FLOOD.sealed[b.r] && FLOOD.sealed[b.r][b.c]) continue;
-      const x = b.c * MAZE.cellW, y = b.r * MAZE.cellH;
+      const x = MAZE.offX + b.c * MAZE.cellW, y = MAZE.offY + b.r * MAZE.cellH;
       const w = MAZE.cellW, h = MAZE.cellH;
       const base = COLORS[b.color];
       const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300 + b.c + b.r);
-      // Gradient brick body: tinted but deep, so the color reads as "this gate
-      // belongs to that square" while still looking like solid masonry.
-      const bg = ctx.createLinearGradient(x, y, x, y + h);
-      bg.addColorStop(0, shade(base, 0.10));
-      bg.addColorStop(0.5, shade(base, -0.30));
-      bg.addColorStop(1, shade(base, -0.50));
-      ctx.fillStyle = bg;
-      ctx.fillRect(x, y, w + 0.5, h + 0.5);
-      // brick courses: mortar lines (offset every other row for a running bond)
-      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-      ctx.lineWidth = 1;
-      const rows = 3, brickH = h / rows;
-      for (let rr = 0; rr < rows; rr++) {
-        const by = y + rr * brickH;
-        ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + w, by); ctx.stroke();
-        const offset = (rr % 2 === 0) ? 0 : w / 2;
-        for (let vx = offset; vx <= w; vx += w / 2) {
-          ctx.beginPath(); ctx.moveTo(x + vx, by); ctx.lineTo(x + vx, by + brickH); ctx.stroke();
-        }
-      }
-      // bevel highlight + bottom shade
-      ctx.fillStyle = 'rgba(255,255,255,0.14)';
-      ctx.fillRect(x, y, w, Math.max(2, h * 0.08));
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
-      ctx.fillRect(x, y + h - Math.max(2, h * 0.08), w, Math.max(2, h * 0.08));
-      // GLOWING colored rim so you instantly read which color may pass.
+      // Solid flat colored block (this gate's color). NO mortar/grid/bevel lines.
+      ctx.fillStyle = base;
+      ctx.fillRect(x, y, w + 1, h + 1);
+      // A single soft glowing colored outline so it reads as a colored gate
+      // (one clean rim — not a grid).
       ctx.save();
       ctx.shadowColor = base;
-      ctx.shadowBlur = 6 + 5 * pulse;
-      ctx.strokeStyle = shade(base, 0.30);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1.25, y + 1.25, w - 2.5, h - 2.5);
+      ctx.shadowBlur = 8 + 6 * pulse;
+      ctx.strokeStyle = shade(base, 0.35);
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
       ctx.restore();
     }
   }
