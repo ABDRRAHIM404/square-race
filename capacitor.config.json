@@ -1,0 +1,11 @@
+{
+  "appId": "com.squarerace.game",
+  "appName": "Square Race",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
