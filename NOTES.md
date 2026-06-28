@@ -202,3 +202,67 @@ the gameplay is now "watch them bounce for up to 2 min, then rank by proximity."
 If you later want squares to actually bounce INTO the exit naturally, the mazes
 need to be more open (rooms/pillars) — flagged, not changed (honoring the
 explicit pure-physics + 2-min-cap instruction).
+
+---
+
+# UPDATE — match the viral reference video (simu.lation2d "SQUARE RACE")
+
+User shared screenshots of the real viral game and identified how it solves the
+billiard-in-corridor problem + visual upgrades. Plan:
+
+1. **Advancing blue wall (THE corridor-loop fix)** — a blue wall grows cell-by-
+   cell ALONG the single-path corridor from the START, sealing the path behind
+   the squares so they can only go forward. Pure billiard physics are KEPT
+   (no pathfinding); the wall just squeezes squares toward the exit, guaranteeing
+   they reach it. Wall only PUSHES — never catches/eliminates a square (if it
+   reaches a square's cell it just keeps it ahead).
+2. **Fair launch** — all 4 squares launch at the SAME angle/speed-direction and
+   are SEPARATED (spread out) at the start, not random per-square.
+3. **Motion trails** — colored comet trail behind each moving square.
+4. **Colored brick walls** — some wall blocks are tinted a square's color; only
+   the MATCHING color breaks/passes through that brick (a color-exclusive
+   shortcut); other colors bounce off it as a normal wall.
+5. Floor stays as-is (light corridors) — good already.
+6. **Checkered-flag exit** instead of the "EX" tile.
+7. **Glossier squares** (bevel/highlight) instead of flat fill.
+8. (caption "Choose a Square" ignored — it's just the video's text overlay.)
+
+
+## STATUS — reference-match update COMPLETE & verified (all 8 items)
+
+1. **Advancing blue flood wall** ✅ `FLOOD` system: seals corridor cells start→exit
+   (`MAZE.path` from `computePath`, used ONLY by the wall — squares stay pure
+   physics). `updateFlood` advances steadily (~26s sweep) and PUSHES any square
+   at/behind the front to the next open path cell (never catches/eliminates).
+   Indigo `#3b32a6` with pulsing bright leading edge. Timing-verified: all 5
+   stages settle naturally in ~24–26s.
+2. **Fair separated launch** ✅ `spawnSquares` + `launchDirection()`/`stepDir()`:
+   identical 45° diagonal for all four, spread along the start corridor.
+3. **Motion trails** ✅ `trail[]` per square (TRAIL_LEN 12), `drawTrail` tapering
+   fading comet streak in the square's color.
+4. **Colored brick walls (break_match)** ✅ `BRICKS` system: bricks placed on
+   interior path cells (spacing 12, margin 4 → 8 gates, 2 per color). A brick
+   blocks every square EXCEPT its matching color (`isWallForSquare` returns true
+   for non-matching). The matching square enters → `tryBreakBrick` shatters it
+   (`spawnBrickShards` particle burst, brick `broken=true`, opens for everyone).
+   The flood also clears any brick it swallows, and the flood-push skips ahead of
+   unbreakable gates so no square is ever trapped. Brick-textured render
+   (`drawBricks`): tinted block + running-bond mortar lines + outline.
+   Dedicated test `/tmp/bricks.js`: wrong color = wall, matching color = passes &
+   breaks, broken brick blocks no one. ALL PASS.
+5. Floor unchanged (light `#e9edf2` + faint checker) — per user "floor is good".
+6. **Checkered-flag exit** ✅ `drawCheckeredFlag` 4×4 black/white checker +
+   pulsing gold border, replaces the old "EX" tile.
+7. **Glossier squares** ✅ `drawSquare` rounded corners r=4, white top-highlight
+   band, bottom inner-shadow, dark outline.
+8. Video caption ignored.
+
+Verification this session: `node --check www/game.js` OK; `/tmp/flood.js` (all 5
+stages settle 24–26s with bricks live); `/tmp/bricks.js` (all brick rules pass);
+`/tmp/e2e3.js` (pure physics, constant speed/reflection, no steering fields,
+knife single-use, reduced speeds, 4 placed, settles within cap) — the only
+"fail" there is a STALE assertion "MAZE has no path field", which is now
+intentionally present for the flood wall (squares still never read it).
+Visual logic mirrored & sanity-rendered via `/tmp/render_v2.js` (path 97,
+flood front, 8 bricks). Static maze walls kept dark slate `#2b2f44` (the flood is
+the indigo element, matching the reference's blue advancing wall).
