@@ -159,3 +159,46 @@ shield carriers, shield ripple, and explosion fragments confirmed; scratch
 cleaned up.
 
 UPDATE COMPLETE ✅ — project remains push-ready.
+
+---
+
+# UPDATE — PURE BILLIARD PHYSICS (remove ALL pathfinding/attraction)
+
+User feedback: squares were navigating to the exit (the corridor-guidance /
+exit-attraction added earlier). User demanded pure billiard physics with zero
+exit knowledge. DONE:
+
+1. **Removed all pathfinding & exit attraction** — deleted `computePath()`,
+   `advancePathIdx()`, `MAZE.path`, and per-square `pathIdx`/`stuckTime`. No
+   attraction force, no steering, no corridor guidance anywhere.
+2. **Removed self-rotation** — live squares no longer spin (`sq.angle` stays 0
+   during play; deleted the `sq.angle += ...` movement increment). `angle` is
+   now used ONLY for the death spin-out animation on eliminated squares.
+3. **`moveAndBounce` rewritten to pure reflection** — straight-line constant-
+   speed motion; on hitting a VERTICAL wall flip `vx`, on a HORIZONTAL wall
+   flip `vy` (axis-separate stepping so we know which wall was hit). Speed
+   magnitude never changes (only sign flips) — verified. Removed the old
+   anti-stall random re-kick and speed-renorm (no longer needed; reflection
+   preserves speed). Square-vs-square billiard collisions are kept (legit
+   ball-to-ball physics).
+4. **Safety net = 2-minute cap only** (user's explicit choice). `STAGE_TIME_LIMIT
+   = 120s`. KNOWN/ACCEPTED BEHAVIOR: with single-path grid-aligned corridors,
+   a purely-reflecting square oscillates in its corridor and essentially never
+   bounces into the exit on its own (simulated 16 min → 0 escapes). So in
+   practice each stage runs to the 120s cap, then remaining squares are placed
+   by current distance-to-exit. This is per user instruction ("pure physics
+   only, no safety net except like a 2 minutes cap"). NOT pathfinding — squares
+   never steer; the cap only stops an infinite stage.
+
+Verification (`/tmp/e2e3.js`): live squares don't self-rotate; speed stays
+constant (reflection only); no pathfinding fields exist; manual reflection test
+(horizontal mover flips vx, vy stays exactly 0); knife single-use + reduced
+speeds intact; stage settles at the 120s cap with 4 placed. `node --check` OK;
+JSON/YAML valid; all 5 mazes still validate as single-path.
+
+NOTE for user: because pure reflection + single-path corridors means stages
+end on the 2-minute timer rather than by a square actually reaching the exit,
+the gameplay is now "watch them bounce for up to 2 min, then rank by proximity."
+If you later want squares to actually bounce INTO the exit naturally, the mazes
+need to be more open (rooms/pillars) — flagged, not changed (honoring the
+explicit pure-physics + 2-min-cap instruction).

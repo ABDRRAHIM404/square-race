@@ -89,13 +89,12 @@
     raceTimer: 0,             // seconds elapsed in current RACE
     _stageSettled: false
   };
-  // Hard safety cap: if a stage runs longer than this, force-finish any
-  // squares still bouncing (billiard motion has no guarantee of reaching the
-  // exit, so this prevents an infinite stage).
-  const STAGE_TIME_LIMIT = 45; // seconds (hard safety cap only; corridor
-                               // guidance makes squares finish naturally well
-                               // before this — it exists to guarantee the
-                               // stage always terminates)
+  // Pure billiard physics: squares have no idea where the exit is and only
+  // reach it by randomly bouncing into it. There is NO pathfinding, attraction,
+  // or steering. The only fallback is a generous 2-minute safety cap so a stage
+  // can't hang literally forever — after it elapses, any squares still bouncing
+  // are placed by how close they happen to be to the exit.
+  const STAGE_TIME_LIMIT = 120; // seconds (2-minute hard safety cap ONLY)
   const STAGE_POINTS = [4, 3, 2, 1]; // 1st..4th
 
   /* ---------------------------------------------------------
@@ -379,37 +378,8 @@
     exit: null,      // {x,y} pixel center of exit + {cx,cy} cell
     exitCell: null,
     startCell: null,
-    path: [],        // ordered list of cell centers from S..E (single corridor)
     walls: []        // pixel rects [{x,y,w,h}] for internal+border walls
   };
-
-  // Walk the single corridor from S to E, returning the ordered cell list.
-  // (Each maze is a single path, so a simple "don't step back" walk works.)
-  function computePath() {
-    const path = [];
-    if (!MAZE.startCell || !MAZE.exitCell) return path;
-    const isOpen = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
-    let c = MAZE.startCell.c, r = MAZE.startCell.r;
-    let pc = -1, pr = -1; // previous cell (so we never step back)
-    const guard = MAZE.rows * MAZE.cols + 5;
-    for (let i = 0; i < guard; i++) {
-      path.push({ c, r });
-      if (c === MAZE.exitCell.c && r === MAZE.exitCell.r) break;
-      const nbrs = [[c, r - 1], [c, r + 1], [c - 1, r], [c + 1, r]];
-      let next = null;
-      for (const [nc, nr] of nbrs) {
-        if (!isOpen(nc, nr)) continue;
-        if (nc === pc && nr === pr) continue; // don't go back
-        next = [nc, nr]; break;
-      }
-      if (!next) break;
-      pc = c; pr = r; c = next[0]; r = next[1];
-    }
-    return path.map(p => {
-      const ctr = cellCenter(p.c, p.r);
-      return { c: p.c, r: p.r, x: ctr.x, y: ctr.y };
-    });
-  }
 
   function loadStage(index) {
     const layout = MAZE_LAYOUTS[index % MAZE_LAYOUTS.length];
@@ -451,10 +421,6 @@
       MAZE.exitCell = exitCell;
       MAZE.exit = cellCenter(exitCell.c, exitCell.r);
     }
-    // Precompute the single-corridor path order (used to guide squares along
-    // the maze toward the exit, since straight-line attraction would push them
-    // into walls).
-    MAZE.path = computePath();
   }
 
   function cellCenter(c, r) {
@@ -535,7 +501,7 @@
       x: 0, y: 0,
       vx: 0, vy: 0,
       speed: COLOR_SPEED[color],
-      angle: 0,                 // spin visual
+      angle: 0,                 // only used for the death spin-out animation
       alive: true,
       finished: false,          // reached exit
       eliminated: false,
@@ -543,9 +509,7 @@
       opacity: 1,
       isPlayer: false,
       item: null,               // null | 'knife' | 'shield'
-      shieldFlash: 0,           // >0 while the blue shield-block ripple plays
-      pathIdx: 0,               // furthest waypoint reached along the corridor
-      stuckTime: 0              // seconds since pathIdx last advanced
+      shieldFlash: 0            // >0 while the blue shield-block ripple plays
     };
   }
 
@@ -570,7 +534,8 @@
       if (sq.finished) continue;
 
       moveAndBounce(sq, dt);
-      sq.angle += (sq.vx >= 0 ? 1 : -1) * 3 * dt;
+      // No self-rotation: squares do not spin on themselves. They move straight
+      // and only change direction by reflecting off walls (handled above).
 
       // Pickup loot.
       tryPickup(sq);
@@ -588,101 +553,42 @@
     resolveSquareContacts();
   }
 
-  // Move with reflection against maze walls. We step axis-separately so a
-  // square reflects correctly off the cell it would enter.
+  // PURE BILLIARD PHYSICS — reflection off walls only.
+  //
+  // The square moves in a straight line at constant speed. It has ZERO
+  // knowledge of where the exit is: no pathfinding, no attraction, no steering.
+  // Direction only ever changes when the square physically collides with a
+  // wall, and then it reflects (angle of incidence = angle of reflection):
+  //   - hit a VERTICAL wall   -> flip vx
+  //   - hit a HORIZONTAL wall -> flip vy
+  // We step the axes separately so we know which kind of wall was struck.
   function moveAndBounce(sq, dt) {
     const half = SQUARE_SIZE / 2;
 
-    // X axis.
-    let nx = sq.x + sq.vx * dt;
+    // --- X axis: move, and if we'd enter a wall, reflect vx (vertical wall) ---
+    const nx = sq.x + sq.vx * dt;
     if (sq.vx > 0 && isWallAtPixel(nx + half, sq.y)) {
-      sq.vx = -Math.abs(sq.vx); nx = sq.x; bounceFx(sq);
+      sq.vx = -sq.vx; bounceFx(sq);           // reflect off vertical wall
     } else if (sq.vx < 0 && isWallAtPixel(nx - half, sq.y)) {
-      sq.vx = Math.abs(sq.vx); nx = sq.x; bounceFx(sq);
+      sq.vx = -sq.vx; bounceFx(sq);
+    } else {
+      sq.x = nx;                              // no wall: advance straight
     }
-    sq.x = nx;
 
-    // Y axis.
-    let ny = sq.y + sq.vy * dt;
+    // --- Y axis: move, and if we'd enter a wall, reflect vy (horizontal wall) ---
+    const ny = sq.y + sq.vy * dt;
     if (sq.vy > 0 && isWallAtPixel(sq.x, ny + half)) {
-      sq.vy = -Math.abs(sq.vy); ny = sq.y; bounceFx(sq);
+      sq.vy = -sq.vy; bounceFx(sq);           // reflect off horizontal wall
     } else if (sq.vy < 0 && isWallAtPixel(sq.x, ny - half)) {
-      sq.vy = Math.abs(sq.vy); ny = sq.y; bounceFx(sq);
+      sq.vy = -sq.vy; bounceFx(sq);
+    } else {
+      sq.y = ny;                              // no wall: advance straight
     }
-    sq.y = ny;
 
-    // Safety clamp to inside the screen.
+    // Safety clamp to keep the square on-screen (the border is solid wall, so
+    // this only guards against numerical drift — it does NOT change vx/vy).
     sq.x = Math.max(half, Math.min(view.w - half, sq.x));
     sq.y = Math.max(half, Math.min(view.h - half, sq.y));
-
-    // Anti-stall: if a square nearly stops (corner case), re-kick it.
-    const sp = Math.hypot(sq.vx, sq.vy);
-    if (sp < sq.speed * 0.5) {
-      const a = rand() * Math.PI * 2;
-      sq.vx = Math.cos(a) * sq.speed;
-      sq.vy = Math.sin(a) * sq.speed;
-    } else if (Math.abs(sp - sq.speed) > 1) {
-      // keep constant speed (billiard)
-      sq.vx = (sq.vx / sp) * sq.speed;
-      sq.vy = (sq.vy / sp) * sq.speed;
-    }
-
-    // Corridor guidance: each maze is a single path, so we steer the square
-    // along the actual corridor toward the exit rather than straight-line
-    // (which would push it into walls). The square keeps bouncing, but a
-    // gentle, time-ramping bias toward the next waypoint *ahead on the path*
-    // ensures steady forward progress so the stage resolves naturally.
-    if (STATE.current === 'RACE' && MAZE.path && MAZE.path.length > 1) {
-      // Advance pathIdx to the nearest waypoint we've actually reached, and
-      // track how long we've gone without progressing.
-      const prevIdx = sq.pathIdx;
-      advancePathIdx(sq);
-      if (sq.pathIdx > prevIdx) sq.stuckTime = 0; else sq.stuckTime += dt;
-
-      const GRACE = 3;            // brief pure-billiard period at the start
-      const t = STATE.raceTimer - GRACE;
-      if (t > 0) {
-        const pull = Math.min(0.6, 0.15 + t * 0.035); // ramps up over time
-        // Aim at the very next waypoint along the corridor (so the bias always
-        // points DOWN the open path, never through a wall). A short lookahead
-        // would cut corners into walls in narrow lanes and pin the square.
-        const target = MAZE.path[Math.min(sq.pathIdx + 1, MAZE.path.length - 1)];
-        let dx = target.x - sq.x, dy = target.y - sq.y;
-        const d = Math.hypot(dx, dy) || 1;
-        dx /= d; dy /= d;
-        sq.vx += dx * sq.speed * pull;
-        sq.vy += dy * sq.speed * pull;
-        renormSpeed(sq);
-      }
-
-      // Anti-stall: if a square hasn't advanced along the path for a while
-      // (pinned in a corner), snap its heading straight at the next waypoint
-      // and nudge it there so it always frees itself.
-      if (sq.stuckTime > 0.8) {
-        const target = MAZE.path[Math.min(sq.pathIdx + 1, MAZE.path.length - 1)];
-        let dx = target.x - sq.x, dy = target.y - sq.y;
-        const d = Math.hypot(dx, dy) || 1;
-        sq.vx = (dx / d) * sq.speed;
-        sq.vy = (dy / d) * sq.speed;
-        // tiny step toward the waypoint to escape a tight corner
-        sq.x += (dx / d) * sq.speed * dt * 0.5;
-        sq.y += (dy / d) * sq.speed * dt * 0.5;
-        sq.stuckTime = 0.6; // re-arm but don't fully reset, so it keeps helping
-      }
-    }
-  }
-
-  // Move the square's pathIdx forward to the furthest path waypoint it is now
-  // close to (monotonic — never moves backward), so guidance always aims ahead.
-  function advancePathIdx(sq) {
-    const path = MAZE.path;
-    const reach = Math.max(MAZE.cellW, MAZE.cellH) * 0.7;
-    // Look a little ahead of the current index and snap forward if we've
-    // arrived at a later waypoint (handles the square skipping along).
-    const lookEnd = Math.min(sq.pathIdx + 5, path.length - 1);
-    for (let i = lookEnd; i > sq.pathIdx; i--) {
-      if (Math.hypot(sq.x - path[i].x, sq.y - path[i].y) < reach) { sq.pathIdx = i; break; }
-    }
   }
 
   let _bounceCooldown = 0;
@@ -1165,10 +1071,11 @@
 
     updateSquares(dt);
 
-    // Safety: if the stage drags on past the time limit (billiard motion has
-    // no guarantee of reaching the exit), force any still-active squares to
-    // finish — ranked by how close they are to the exit (closest finishes
-    // first). This guarantees every stage terminates.
+    // 2-minute safety cap (the ONLY fallback): pure billiard motion has no
+    // guarantee of bouncing into the exit, so if a stage is still going after
+    // STAGE_TIME_LIMIT we place any remaining squares by how close they happen
+    // to be to the exit. This is not pathfinding — squares never steer toward
+    // the exit during play; this only stops a stage from running forever.
     if (STATE.raceTimer >= STAGE_TIME_LIMIT) {
       const remaining = SQUARES.filter(s => !s.finished && !s.eliminated);
       remaining.sort((a, b) => {
