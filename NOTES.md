@@ -311,3 +311,33 @@ brick rules, fairness (same 45° launch, separated, trails), and pure-physics
 settles within cap) all PASS. Faithful SVG snapshot rendered (`snapshot.jpg`):
 gradient beveled walls, smooth gradient flood face + glow, 4 glossy gradient
 squares w/ radial specular + comet trails, glowing gradient bricks.
+
+## UPDATE — wider floor (smaller grid) + flood another 40% slower
+
+User: "make the floor wider, like 3 cells" + (follow-up) keep the same push
+behavior but make the wall 40% slower again. User chose the "bigger cells /
+fewer rows" approach (keep single-file 1-wide corridor logic; just enlarge cells
+so the floor LOOKS ~3x wider). Rationale: computePath/flood/brick logic all
+assume a single-file corridor; widening to a literal 3-wide corridor would need
+a path-logic rewrite. Enlarging cells achieves the wider-floor look safely.
+
+1. **MAZE_LAYOUTS rebuilt on a 9-wide grid** (was 15x15). New cells are
+   ~43px wide x ~77px tall (was ~26x56), so the corridor floor reads markedly
+   wider. All 5 are validated single-path (S->E, no branching, every open cell
+   on the path, maxNeighbors<=2):
+   - M1 9x11 horizontal serpentine (path 39)
+   - M2 9x11 vertical weaving lanes (path 39)
+   - M3 9x11 flipped horizontal (path 39)
+   - M4 9x13 longer horizontal serpentine (path 47)
+   - M5 9x13 longer vertical serpentine (path 47)
+   Validated with /tmp/finalmazes.js (opens==pathLen, reachedE, maxNb<=2).
+2. **Flood 40% slower again** — sweep `pathLen/52` -> `pathLen/87`. Stages now
+   settle naturally in ~65-82s (was ~47-51s), all well under the 120s cap. Push
+   behavior unchanged (advances + pushes squares forward, full width).
+3. **Brick spacing tightened** to match shorter paths: spacing 12->6, margin
+   4->3, giving ~6 gates/stage (all 4 colors covered) instead of 3.
+
+Verification: node --check OK; per-stage flood timing 65-82s all 5; bricks,
+fairness (same 45 deg launch, separated, trails), pure-physics (no rotation,
+constant 140 speed, reflection-only, knife single-use, 4 placed, settles in cap)
+all PASS. Snapshot re-rendered (snapshot.jpg) with the wider 9-wide corridors.

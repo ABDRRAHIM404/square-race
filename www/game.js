@@ -296,95 +296,82 @@
    * degree >= 3; exactly two degree-1 endpoints: S and E).
    * ========================================================= */
   const MAZE_LAYOUTS = [
+    // Maze grid is intentionally SMALL (9 wide) so each cell is large and the
+    // open corridor/floor reads about 3x wider than before. Corridors stay a
+    // single cell wide (single-path) so the flood wall + path logic still work.
     // 1 — horizontal serpentine (wide switchback corridor)
     [
-      '###############',
-      '#S............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#............E#',
-      '###############'
+      '#########',
+      '#S......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#......E#',
+      '#########'
     ],
-    // 2 — vertical serpentine (narrow weaving lanes)
+    // 2 — vertical serpentine (weaving lanes)
     [
-      '###############',
-      '#S#...#...#...#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#...#...#...#E#',
-      '###############'
+      '#########',
+      '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#...#...#',
+      '#########'
     ],
     // 3 — horizontal serpentine, flipped (start bottom, exit top)
     [
-      '###############',
-      '#............E#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#S............#',
-      '###############'
+      '#########',
+      '#......E#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#S......#',
+      '#########'
     ],
-    // 4 — wide vertical lanes (thick pillars between lanes)
+    // 4 — longer horizontal serpentine (extra switchbacks)
     [
-      '###############',
-      '#S##....##....#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#....##....##E#',
-      '###############'
+      '#########',
+      '#S......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#E......#',
+      '#########'
     ],
-    // 5 — double-thick horizontal serpentine (longer winding run)
+    // 5 — longer vertical serpentine (taller weaving lanes)
     [
-      '###############',
-      '#S............#',
-      '#############.#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.#############',
-      '#............E#',
-      '###############'
+      '#########',
+      '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#...#...#',
+      '#########'
     ]
   ];
 
@@ -564,9 +551,9 @@
     // the start/exit so those stay clear. Rotate the four colors so each
     // square has gates only it can pass.
     const colors = COLOR_ORDER;
-    const margin = 4;
+    const margin = 3;
     let colorIdx = 0;
-    const spacing = 12;
+    const spacing = 6;
     for (let i = margin; i < path.length - margin; i += spacing) {
       const cell = path[i];
       if (MAZE.startCell && cell.c === MAZE.startCell.c && cell.r === MAZE.startCell.r) continue;
@@ -588,7 +575,7 @@
     // Tune the advance so a stage finishes in a watchable time: cover the whole
     // path over roughly the available race window.
     const pathLen = Math.max(1, MAZE.path.length);
-    FLOOD.speedCells = pathLen / 52; // ~52s to sweep the corridor (50% slower)
+    FLOOD.speedCells = pathLen / 87; // ~87s sweep (was /52, now a further 40% slower)
   }
 
   // Path index of the cell a square currently occupies (-1 if off-path).
