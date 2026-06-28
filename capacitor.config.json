@@ -1,6 +1,6 @@
 {
-  "appId": "com.squarerace.game",
-  "appName": "Square Race",
+  "appId": "com.mazerunners.game",
+  "appName": "Maze Runners",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
