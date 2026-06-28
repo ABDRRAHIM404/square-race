@@ -108,3 +108,54 @@ user's local clone path); README notes the folder name is cosmetic and safe to
 rename. All JSON/YAML/JS re-validated after the rebrand.
 
 MAZE REDESIGN + REBRAND COMPLETE ✅ — project is push-ready.
+
+---
+
+# UPDATE — single-path mazes, knife fix, slower speed, effects, sounds
+
+Six requested changes (all DONE & verified):
+
+1. **Single-path mazes** — all 5 MAZE_LAYOUTS replaced with SINGLE-PATH
+   corridors (one continuous route IN→EX, NO branching). Verified: every open
+   cell has degree ≤ 2; exactly two degree-1 endpoints (S & E); 0 internal
+   junctions (deg3=0). Designs: horizontal serpentine, narrow vertical lanes,
+   flipped serpentine, wide vertical lanes, double-thick serpentine.
+   - Because straight-line exit-attraction pushed squares into corridor walls,
+     replaced it with **corridor guidance**: `computePath()` walks the single
+     corridor into an ordered waypoint list; each square tracks `pathIdx` and
+     gets a gentle, time-ramping bias toward the NEXT waypoint along the path
+     (never through walls). Added an **anti-stall** (if `pathIdx` doesn't
+     advance for 0.8s, snap heading at the next waypoint + nudge) so squares
+     never pin in a corner. Stages now finish naturally (~16–35s); 45s hard cap
+     remains as a safety net (≈1.5% of stage-runs in stress test, force-finished
+     by distance-to-exit → always valid placements).
+
+2. **Knife single-use** — `knifeStrike()` now sets `attacker.item = null` the
+   moment it connects (on a kill OR a shield-block). A spent knife can't kill a
+   second square. Verified: kill→knife gone→second strike does nothing.
+
+3. **Slower movement** — `COLOR_SPEED` reduced 30%: yellow 250→175, red
+   230→161, green 215→150, blue 200→140.
+
+4. **Death explosion** — added a PARTICLES system. `eliminate()` calls
+   `spawnExplosion()` (14 colored fragments bursting outward with drag +
+   gravity + spin, ~0.85s life). Updated/drawn each RACE frame; reset per stage.
+
+5. **Shield effect** — shield block sets `shieldFlash` → an expanding blue
+   ripple ring + bright inner flash (0.5s) around the shielded square.
+
+6. **Distinct sounds** — new Web Audio helpers `glide()` (freq sweep) and
+   `noise()` (filtered noise burst):
+   - knife kill = explosion **boom** (low sine drop + noise blast + rumble),
+   - shield block = metallic **ping** (detuned high glides),
+   - reach exit = rising success **chime** (G5→B5→E6 arpeggio).
+
+Verification: `node --check` OK; all 5 mazes validate as single-path
+(`/tmp/extract_mazes.js`); full 5-stage e2e passes (`/tmp/e2e2.js`) incl. speed
+values, knife single-use, knife+shield mutual consume, shield ripple flag,
+explosion particle spawn, points total 50; timing/stress harnesses confirm
+natural completion. Visual SVG→PNG snapshot of the single-path maze with knife/
+shield carriers, shield ripple, and explosion fragments confirmed; scratch
+cleaned up.
+
+UPDATE COMPLETE ✅ — project remains push-ready.

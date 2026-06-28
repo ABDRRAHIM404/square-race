@@ -92,8 +92,10 @@
   // Hard safety cap: if a stage runs longer than this, force-finish any
   // squares still bouncing (billiard motion has no guarantee of reaching the
   // exit, so this prevents an infinite stage).
-  const STAGE_TIME_LIMIT = 30; // seconds (hard cap; squares are pulled toward
-                               // the exit before this so most stages end sooner)
+  const STAGE_TIME_LIMIT = 45; // seconds (hard safety cap only; corridor
+                               // guidance makes squares finish naturally well
+                               // before this — it exists to guarantee the
+                               // stage always terminates)
   const STAGE_POINTS = [4, 3, 2, 1]; // 1st..4th
 
   /* ---------------------------------------------------------
@@ -152,11 +154,66 @@
       osc.connect(gain); gain.connect(this.master || this.ctx.destination);
       osc.start(t0); osc.stop(t0 + dur + 0.02);
     },
+    // Oscillator that glides from f1 to f2 (for pings/sweeps).
+    glide(f1, f2, dur, type, vol, off) {
+      if (!this.ctx) return;
+      const t0 = this.ctx.currentTime + (off || 0);
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(f1, t0);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, f2), t0 + dur);
+      gain.gain.setValueAtTime(vol == null ? 0.12 : vol, t0);
+      gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+      osc.connect(gain); gain.connect(this.master || this.ctx.destination);
+      osc.start(t0); osc.stop(t0 + dur + 0.02);
+    },
+    // Filtered noise burst (for the explosion boom body).
+    noise(dur, vol, off, lpStart, lpEnd) {
+      if (!this.ctx) return;
+      const t0 = this.ctx.currentTime + (off || 0);
+      const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = this.ctx.createBufferSource(); src.buffer = buf;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(vol == null ? 0.2 : vol, t0);
+      gain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+      let node = src;
+      if (typeof this.ctx.createBiquadFilter === 'function') {
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(lpStart || 1800, t0);
+        lp.frequency.exponentialRampToValueAtTime(lpEnd || 300, t0 + dur);
+        src.connect(lp); lp.connect(gain);
+      } else {
+        src.connect(gain);
+      }
+      gain.connect(this.master || this.ctx.destination);
+      src.start(t0); src.stop(t0 + dur + 0.02);
+    },
     playBounce() { this.beep(320, 0.04, 'square', 0.05); },
     playPickup() { this.beep(660, 0.08, 'triangle', 0.10); this.beep(880, 0.08, 'triangle', 0.09, 0.05); },
-    playElim()   { this.beep(240, 0.05, 'square', 0.13); this.beep(90, 0.30, 'sawtooth', 0.16, 0.05); },
-    playShield() { this.beep(520, 0.10, 'sawtooth', 0.12); this.beep(300, 0.14, 'square', 0.10, 0.05); },
-    playExit()   { this.beep(700, 0.10, 'square', 0.12); this.beep(1040, 0.16, 'square', 0.12, 0.07); },
+    // Knife kill — explosion boom: a punchy low sine drop + a filtered noise
+    // burst for the "blast" body.
+    playElim() {
+      this.glide(180, 40, 0.34, 'sine', 0.22);          // deep boom thump
+      this.noise(0.30, 0.20, 0, 2200, 250);             // blast crackle
+      this.beep(70, 0.30, 'sawtooth', 0.14, 0.02);      // rumble tail
+    },
+    // Shield block — bright metallic ping (two detuned high glides = "ting").
+    playShield() {
+      this.glide(1400, 2100, 0.16, 'triangle', 0.16);
+      this.glide(2000, 2950, 0.18, 'sine', 0.10, 0.01);
+      this.beep(3100, 0.05, 'square', 0.05, 0.0);       // tiny metallic edge
+    },
+    // Reach exit — rising success chime (three-note arpeggio up).
+    playExit() {
+      this.beep(784, 0.12, 'triangle', 0.13, 0.00);     // G5
+      this.beep(988, 0.12, 'triangle', 0.13, 0.08);     // B5
+      this.beep(1319, 0.20, 'triangle', 0.14, 0.16);    // E6
+    },
     playFinish() { [523, 659, 784, 1047].forEach((f, i) => this.beep(f, 0.22, 'square', 0.13, i * 0.11)); },
     playCount(h) { this.beep(h ? 880 : 440, 0.14, 'square', 0.14); },
     playSelect() { this.beep(620, 0.08, 'triangle', 0.10); },
@@ -201,106 +258,113 @@
   };
   const COLOR_ORDER = ['yellow', 'blue', 'green', 'red'];
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
-  const COLOR_SPEED = { yellow: 250, red: 230, green: 215, blue: 200 };
+  // Speeds reduced 30% from the original tuning so motion is easy to follow.
+  const COLOR_SPEED = { yellow: 175, red: 161, green: 150, blue: 140 };
 
   /* =========================================================
-   * MAZE LAYOUTS (hardcoded, 5 varied designs)
+   * MAZE LAYOUTS (hardcoded, 5 SINGLE-PATH designs)
    *
    * Legend per cell character:
    *   '#' wall   '.' open   'S' start/entry   'E' exit
-   * All layouts are rectangular (equal-length rows). Borders are walls
-   * except where the entry/exit sit. The grid is scaled to fill the
-   * screen (aspect handled by separate cell width/height).
+   *
+   * Each maze is a SINGLE continuous corridor (one route from IN to EX with
+   * NO branching). Every open cell lies on that one path — there are no
+   * choices and no dead-ends except the entry and exit. The squares bounce
+   * back and forth along the corridor and eventually reach the exit.
+   *
+   * All layouts are rectangular (equal-length rows) and the border is solid
+   * wall except where the entry/exit sit. Verified single-path (no cell has
+   * degree >= 3; exactly two degree-1 endpoints: S and E).
    * ========================================================= */
   const MAZE_LAYOUTS = [
-    // 1 — open rooms with cross corridors
+    // 1 — horizontal serpentine (wide switchback corridor)
     [
       '###############',
       '#S............#',
-      '#.###.###.###.#',
-      '#.#.......#...#',
-      '#.#.#####.#.#.#',
-      '#...#...#...#.#',
-      '#.###.#.#####.#',
-      '#.....#.......#',
-      '#.#####.#####.#',
-      '#.#.......#...#',
-      '#.#.#####.#.#.#',
-      '#...#...#...#.#',
-      '#.###.###.##..#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.............#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.............#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
       '#............E#',
       '###############'
     ],
-    // 2 — concentric rings
+    // 2 — vertical serpentine (narrow weaving lanes)
     [
       '###############',
-      '#S............#',
-      '#.###########.#',
-      '#.#.........#.#',
-      '#.#.#######.#.#',
-      '#.#.#.....#.#.#',
-      '#.#.#.###.#.#.#',
+      '#S#...#...#...#',
       '#.#.#.#.#.#.#.#',
       '#.#.#.#.#.#.#.#',
-      '#.#.#...#.#.#.#',
-      '#.#.#####.#.#.#',
-      '#.#.......#.#.#',
-      '#.#########.#.#',
-      '#...........E.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#.#.#.#.#.#.#.#',
+      '#...#...#...#E#',
       '###############'
     ],
-    // 3 — diagonal staircase corridors
+    // 3 — horizontal serpentine, flipped (start bottom, exit top)
     [
       '###############',
-      '#S..#......#..#',
-      '###.#.####.#.##',
-      '#...#.#..#.#..#',
-      '#.###.#.##.##.#',
-      '#.#...#......##',
-      '#.#.#########.#',
-      '#.#.........#.#',
-      '#.#########.#.#',
-      '#.........#.#.#',
-      '#########.#.#.#',
-      '#.......#.#..##',
-      '#.#####.#.###.#',
-      '#.......#...E.#',
-      '###############'
-    ],
-    // 4 — comb / parallel teeth
-    [
-      '###############',
-      '#S............#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#...........#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#...#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#...........#.#',
-      '#.#########.#.#',
-      '#..........E..#',
-      '###############'
-    ],
-    // 5 — scattered pillars (mostly open, billiard-friendly)
-    [
-      '###############',
-      '#S............#',
-      '#...##....##..#',
-      '#.#....##.....#',
-      '#....##....##.#',
-      '#.##....#....##',
-      '#....##...##..#',
-      '#.#....##.....#',
-      '#..##....##...#',
-      '#....#....#..##',
-      '#.##...##....##',
-      '#....##....#..#',
-      '#.#....##....E#',
+      '#............E#',
+      '#.#############',
       '#.............#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.............#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.............#',
+      '#############.#',
+      '#S............#',
+      '###############'
+    ],
+    // 4 — wide vertical lanes (thick pillars between lanes)
+    [
+      '###############',
+      '#S##....##....#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#.##.##.##.##.#',
+      '#....##....##E#',
+      '###############'
+    ],
+    // 5 — double-thick horizontal serpentine (longer winding run)
+    [
+      '###############',
+      '#S............#',
+      '#############.#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.#############',
+      '#.............#',
+      '#############.#',
+      '#############.#',
+      '#.............#',
+      '#.#############',
+      '#.#############',
+      '#............E#',
       '###############'
     ]
   ];
@@ -314,8 +378,38 @@
     start: null,     // {x,y} pixel center of entry
     exit: null,      // {x,y} pixel center of exit + {cx,cy} cell
     exitCell: null,
+    startCell: null,
+    path: [],        // ordered list of cell centers from S..E (single corridor)
     walls: []        // pixel rects [{x,y,w,h}] for internal+border walls
   };
+
+  // Walk the single corridor from S to E, returning the ordered cell list.
+  // (Each maze is a single path, so a simple "don't step back" walk works.)
+  function computePath() {
+    const path = [];
+    if (!MAZE.startCell || !MAZE.exitCell) return path;
+    const isOpen = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
+    let c = MAZE.startCell.c, r = MAZE.startCell.r;
+    let pc = -1, pr = -1; // previous cell (so we never step back)
+    const guard = MAZE.rows * MAZE.cols + 5;
+    for (let i = 0; i < guard; i++) {
+      path.push({ c, r });
+      if (c === MAZE.exitCell.c && r === MAZE.exitCell.r) break;
+      const nbrs = [[c, r - 1], [c, r + 1], [c - 1, r], [c + 1, r]];
+      let next = null;
+      for (const [nc, nr] of nbrs) {
+        if (!isOpen(nc, nr)) continue;
+        if (nc === pc && nr === pr) continue; // don't go back
+        next = [nc, nr]; break;
+      }
+      if (!next) break;
+      pc = c; pr = r; c = next[0]; r = next[1];
+    }
+    return path.map(p => {
+      const ctr = cellCenter(p.c, p.r);
+      return { c: p.c, r: p.r, x: ctr.x, y: ctr.y };
+    });
+  }
 
   function loadStage(index) {
     const layout = MAZE_LAYOUTS[index % MAZE_LAYOUTS.length];
@@ -350,12 +444,17 @@
       }
     }
     if (startCell) {
+      MAZE.startCell = startCell;
       MAZE.start = cellCenter(startCell.c, startCell.r);
     }
     if (exitCell) {
       MAZE.exitCell = exitCell;
       MAZE.exit = cellCenter(exitCell.c, exitCell.r);
     }
+    // Precompute the single-corridor path order (used to guide squares along
+    // the maze toward the exit, since straight-line attraction would push them
+    // into walls).
+    MAZE.path = computePath();
   }
 
   function cellCenter(c, r) {
@@ -368,6 +467,61 @@
     const r = Math.floor(py / MAZE.cellH);
     if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
     return MAZE.grid[r][c] === '#';
+  }
+
+  // Visual-effect tuning.
+  const SHIELD_FLASH_TIME = 0.5; // seconds for the blue shield ripple
+
+  /* =========================================================
+   * PARTICLES (death explosion fragments)
+   * ========================================================= */
+  let PARTICLES = [];
+
+  // Burst a cluster of small colored fragments outward from (x,y).
+  function spawnExplosion(x, y, color) {
+    const n = 14;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.5;
+      const sp = 80 + Math.random() * 170;
+      PARTICLES.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        size: 3 + Math.random() * 4,
+        life: 0.5 + Math.random() * 0.35,
+        maxLife: 0.85,
+        color,
+        spin: (Math.random() - 0.5) * 16,
+        angle: Math.random() * Math.PI
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (let i = PARTICLES.length - 1; i >= 0; i--) {
+      const p = PARTICLES[i];
+      p.life -= dt;
+      if (p.life <= 0) { PARTICLES.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.90;          // drag
+      p.vy *= 0.90;
+      p.vy += 90 * dt;       // slight gravity so fragments settle
+      p.angle += p.spin * dt;
+    }
+  }
+
+  function drawParticles() {
+    for (const p of PARTICLES) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.maxLife));
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /* =========================================================
@@ -389,7 +543,9 @@
       opacity: 1,
       isPlayer: false,
       item: null,               // null | 'knife' | 'shield'
-      _exitGraceFlash: 0
+      shieldFlash: 0,           // >0 while the blue shield-block ripple plays
+      pathIdx: 0,               // furthest waypoint reached along the corridor
+      stuckTime: 0              // seconds since pathIdx last advanced
     };
   }
 
@@ -471,22 +627,61 @@
       sq.vy = (sq.vy / sp) * sq.speed;
     }
 
-    // Exit attraction: after an initial free-bounce period, gently bias the
-    // square's heading toward the exit so dense mazes still resolve. The pull
-    // strength ramps up with elapsed race time (0 early, stronger later),
-    // keeping early play billiard-like while guaranteeing progress.
-    if (MAZE.exit && STATE.current === 'RACE') {
-      const GRACE = 6;            // seconds of pure billiard motion first
+    // Corridor guidance: each maze is a single path, so we steer the square
+    // along the actual corridor toward the exit rather than straight-line
+    // (which would push it into walls). The square keeps bouncing, but a
+    // gentle, time-ramping bias toward the next waypoint *ahead on the path*
+    // ensures steady forward progress so the stage resolves naturally.
+    if (STATE.current === 'RACE' && MAZE.path && MAZE.path.length > 1) {
+      // Advance pathIdx to the nearest waypoint we've actually reached, and
+      // track how long we've gone without progressing.
+      const prevIdx = sq.pathIdx;
+      advancePathIdx(sq);
+      if (sq.pathIdx > prevIdx) sq.stuckTime = 0; else sq.stuckTime += dt;
+
+      const GRACE = 3;            // brief pure-billiard period at the start
       const t = STATE.raceTimer - GRACE;
       if (t > 0) {
-        const pull = Math.min(0.6, t * 0.03); // 0 -> 0.6 over ~20s
-        let dx = MAZE.exit.x - sq.x, dy = MAZE.exit.y - sq.y;
+        const pull = Math.min(0.6, 0.15 + t * 0.035); // ramps up over time
+        // Aim at the very next waypoint along the corridor (so the bias always
+        // points DOWN the open path, never through a wall). A short lookahead
+        // would cut corners into walls in narrow lanes and pin the square.
+        const target = MAZE.path[Math.min(sq.pathIdx + 1, MAZE.path.length - 1)];
+        let dx = target.x - sq.x, dy = target.y - sq.y;
         const d = Math.hypot(dx, dy) || 1;
         dx /= d; dy /= d;
         sq.vx += dx * sq.speed * pull;
         sq.vy += dy * sq.speed * pull;
         renormSpeed(sq);
       }
+
+      // Anti-stall: if a square hasn't advanced along the path for a while
+      // (pinned in a corner), snap its heading straight at the next waypoint
+      // and nudge it there so it always frees itself.
+      if (sq.stuckTime > 0.8) {
+        const target = MAZE.path[Math.min(sq.pathIdx + 1, MAZE.path.length - 1)];
+        let dx = target.x - sq.x, dy = target.y - sq.y;
+        const d = Math.hypot(dx, dy) || 1;
+        sq.vx = (dx / d) * sq.speed;
+        sq.vy = (dy / d) * sq.speed;
+        // tiny step toward the waypoint to escape a tight corner
+        sq.x += (dx / d) * sq.speed * dt * 0.5;
+        sq.y += (dy / d) * sq.speed * dt * 0.5;
+        sq.stuckTime = 0.6; // re-arm but don't fully reset, so it keeps helping
+      }
+    }
+  }
+
+  // Move the square's pathIdx forward to the furthest path waypoint it is now
+  // close to (monotonic — never moves backward), so guidance always aims ahead.
+  function advancePathIdx(sq) {
+    const path = MAZE.path;
+    const reach = Math.max(MAZE.cellW, MAZE.cellH) * 0.7;
+    // Look a little ahead of the current index and snap forward if we've
+    // arrived at a later waypoint (handles the square skipping along).
+    const lookEnd = Math.min(sq.pathIdx + 5, path.length - 1);
+    for (let i = lookEnd; i > sq.pathIdx; i--) {
+      if (Math.hypot(sq.x - path[i].x, sq.y - path[i].y) < reach) { sq.pathIdx = i; break; }
     }
   }
 
@@ -561,14 +756,20 @@
   }
 
   // attacker (knife carrier) strikes victim.
+  // The knife is SINGLE USE: as soon as the attacker connects with another
+  // square (whether it kills, or is blocked by the victim's shield), the
+  // attacker's knife is immediately consumed. One kill (or block) per pickup.
   function knifeStrike(attacker, victim) {
     if (victim.eliminated || victim.finished) return;
+    if (attacker && attacker.item !== 'knife') return; // knife already spent
     if (victim.item === 'shield') {
       victim.item = null;            // shield absorbs one hit, then gone
-      victim._exitGraceFlash = 0.4;
+      victim.shieldFlash = SHIELD_FLASH_TIME; // blue ripple effect
+      if (attacker) attacker.item = null;     // knife is spent on contact
       GameAudio.playShield();
       return;
     }
+    if (attacker) attacker.item = null;        // knife consumed on the kill
     eliminate(victim);
   }
 
@@ -576,12 +777,14 @@
     if (sq.eliminated) return;
     sq.eliminated = true;
     sq.alive = false;
-    sq.eliminationTimer = 1.0;
+    sq.eliminationTimer = 0.6;
     sq.vx = sq.vy = 0;
+    // Burst of colored fragments where the square died.
+    spawnExplosion(sq.x, sq.y, COLORS[sq.color]);
     // Record elimination separately; eliminated squares are placed AFTER all
     // finishers (worst positions), with the last-to-die ranked higher.
     STATE.eliminatedOrder.push(sq.color);
-    GameAudio.playElim();
+    GameAudio.playElim();   // explosion boom
   }
 
   function updateEliminated(sq, dt) {
@@ -613,16 +816,27 @@
     if (sq.item && !sq.eliminated && !sq.finished) {
       drawItemIcon(sq.x, sq.y - half - 9, sq.item, 12);
     }
-    // Shield-block flash.
-    if (sq._exitGraceFlash > 0) {
+    // Shield-block ripple: an expanding blue ring + bright flash when a shield
+    // successfully absorbs a knife hit.
+    if (sq.shieldFlash > 0) {
+      const t = sq.shieldFlash / SHIELD_FLASH_TIME;   // 1 -> 0
       ctx.save();
-      ctx.globalAlpha = Math.min(1, sq._exitGraceFlash);
+      // expanding ripple ring
+      const ripple = half + 4 + (1 - t) * 22;
+      ctx.globalAlpha = Math.max(0, t);
       ctx.strokeStyle = '#9fe7ff';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(sq.x, sq.y, half + 6, 0, Math.PI * 2);
+      ctx.arc(sq.x, sq.y, ripple, 0, Math.PI * 2);
       ctx.stroke();
+      // inner bright flash that fades fast
+      ctx.globalAlpha = Math.max(0, t) * 0.55;
+      ctx.fillStyle = '#cdefff';
+      ctx.beginPath();
+      ctx.arc(sq.x, sq.y, half + 5, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -784,6 +998,7 @@
     STATE._stageSettled = false;
     STATE.raceTimer = 0;
     rand = mulberry32((Date.now() ^ (index * 0x9e3779b1)) >>> 0);
+    PARTICLES = [];
     loadStage(index);
     spawnSquares();
     placeLoot();
@@ -942,8 +1157,9 @@
       if (pointInRect(Input.tapX, Input.tapY, MUTE_BTN)) GameAudio.toggleMute();
       Input.consume();
     }
-    // tick flash timers
-    for (const sq of SQUARES) if (sq._exitGraceFlash > 0) sq._exitGraceFlash -= dt;
+    // tick shield-flash timers + explosion particles
+    for (const sq of SQUARES) if (sq.shieldFlash > 0) sq.shieldFlash -= dt;
+    updateParticles(dt);
 
     STATE.raceTimer += dt;
 
@@ -980,6 +1196,7 @@
     drawMaze();
     drawLoot();
     drawSquares();
+    drawParticles();
     drawRaceHUD();
   }
   function drawRaceHUD() {
