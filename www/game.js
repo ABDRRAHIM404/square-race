@@ -60,6 +60,25 @@
     ctx.closePath();
   }
 
+  // Lighten (amt>0) or darken (amt<0) a #rrggbb hex color by a 0..1 fraction.
+  function shade(hex, amt) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    let r = parseInt(h.slice(0, 2), 16);
+    let g = parseInt(h.slice(2, 4), 16);
+    let b = parseInt(h.slice(4, 6), 16);
+    if (amt >= 0) {
+      r = Math.round(r + (255 - r) * amt);
+      g = Math.round(g + (255 - g) * amt);
+      b = Math.round(b + (255 - b) * amt);
+    } else {
+      const k = 1 + amt; // amt negative
+      r = Math.round(r * k); g = Math.round(g * k); b = Math.round(b * k);
+    }
+    const to2 = v => ('0' + Math.max(0, Math.min(255, v)).toString(16)).slice(-2);
+    return '#' + to2(r) + to2(g) + to2(b);
+  }
+
   /* ---------------------------------------------------------
    * Seeded PRNG — mulberry32
    * ------------------------------------------------------- */
@@ -258,7 +277,8 @@
   const COLOR_ORDER = ['yellow', 'blue', 'green', 'red'];
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
   // Speeds reduced 30% from the original tuning so motion is easy to follow.
-  const COLOR_SPEED = { yellow: 175, red: 161, green: 150, blue: 140 };
+  // Per-color base speeds (already 30% reduced earlier, now a further 20% slower).
+  const COLOR_SPEED = { yellow: 140, red: 129, green: 120, blue: 112 };
 
   /* =========================================================
    * MAZE LAYOUTS (hardcoded, 5 SINGLE-PATH designs)
@@ -450,6 +470,7 @@
       MAZE.exit = cellCenter(exitCell.c, exitCell.r);
     }
     MAZE.path = computePath();
+    MAZE._floorGrad = null; // rebuilt on next draw (handles resize)
   }
 
   function cellCenter(c, r) {
@@ -567,7 +588,7 @@
     // Tune the advance so a stage finishes in a watchable time: cover the whole
     // path over roughly the available race window.
     const pathLen = Math.max(1, MAZE.path.length);
-    FLOOD.speedCells = pathLen / 26; // ~26s to sweep the corridor
+    FLOOD.speedCells = pathLen / 52; // ~52s to sweep the corridor (50% slower)
   }
 
   // Path index of the cell a square currently occupies (-1 if off-path).
@@ -638,25 +659,72 @@
   }
 
   function drawFlood() {
-    // Render sealed cells as the deep indigo "blue wall" with a black edge,
-    // plus a brighter leading edge so the advance reads clearly.
+    if (!MAZE.path.length) return;
+    const w = MAZE.cellW, h = MAZE.cellH;
+    const t = Date.now();
+
+    // Vertical indigo gradient reused for the whole flood body (rich, glossy).
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#5b4fd6');
+    grad.addColorStop(0.5, '#3b32a6');
+    grad.addColorStop(1, '#241d73');
+
+    // 1) Fully sealed cells: smooth indigo body with a subtle top sheen.
     for (let i = 0; i < FLOOD.front; i++) {
       const cell = MAZE.path[i];
       if (!cell) continue;
-      const x = cell.c * MAZE.cellW, y = cell.r * MAZE.cellH;
-      ctx.fillStyle = '#3b32a6';
-      ctx.fillRect(x, y, MAZE.cellW + 0.5, MAZE.cellH + 0.5);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(x, y, MAZE.cellW, 3);
+      const x = cell.c * w, y = cell.r * h;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w + 0.5, h + 0.5);
+      ctx.restore();
+      // top sheen + soft inner border for depth
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(x, y, w, Math.max(2, h * 0.12));
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(x, y + h - Math.max(2, h * 0.10), w, Math.max(2, h * 0.10));
     }
-    // Bright leading edge on the next cell about to be sealed.
+
+    // 2) Continuous leading FACE: partially fill the current cell by the
+    //    fractional progress so the wall advances like rising liquid, not steps.
+    const frac = FLOOD.progress - Math.floor(FLOOD.progress);
     const lead = MAZE.path[FLOOD.front];
+    const next = MAZE.path[Math.min(FLOOD.front + 1, MAZE.path.length - 1)];
     if (lead) {
-      const x = lead.c * MAZE.cellW, y = lead.r * MAZE.cellH;
-      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 120);
-      ctx.fillStyle = `rgba(99,86,255,${0.25 + 0.35 * pulse})`;
-      ctx.fillRect(x, y, MAZE.cellW, MAZE.cellH);
+      const x = lead.c * w, y = lead.r * h;
+      ctx.save();
+      ctx.translate(x, y);
+      fillCellFractionLocal(next ? { c: next.c - lead.c, r: next.r - lead.r } : null, frac, grad, w, h);
+      ctx.restore();
+
+      // Glowing energy edge riding the advancing face.
+      const pulse = 0.55 + 0.45 * Math.sin(t / 220);
+      let dx = next ? Math.sign(next.c - lead.c) : 1;
+      let dy = next ? Math.sign(next.r - lead.r) : 0;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(140,130,255,${0.18 + 0.18 * pulse})`;
+      const eThick = Math.max(w, h) * 0.22 * (0.8 + 0.4 * pulse);
+      if (dx > 0)       ctx.fillRect(x + w * frac - eThick, y, eThick, h);
+      else if (dx < 0)  ctx.fillRect(x + w * (1 - frac), y, eThick, h);
+      else if (dy > 0)  ctx.fillRect(x, y + h * frac - eThick, w, eThick);
+      else if (dy < 0)  ctx.fillRect(x, y + h * (1 - frac), w, eThick);
+      ctx.restore();
     }
+  }
+
+  // Local-space variant of fillCellFraction (origin already translated to cell).
+  function fillCellFractionLocal(dir, frac, fillStyle, w, h) {
+    frac = Math.max(0, Math.min(1, frac));
+    const dx = dir ? Math.sign(dir.c) : 0;
+    const dy = dir ? Math.sign(dir.r) : 0;
+    ctx.fillStyle = fillStyle;
+    if (dx > 0)      ctx.fillRect(0, 0, w * frac + 0.5, h + 0.5);
+    else if (dx < 0) ctx.fillRect(w * (1 - frac), 0, w * frac + 0.5, h + 0.5);
+    else if (dy > 0) ctx.fillRect(0, 0, w + 0.5, h * frac + 0.5);
+    else if (dy < 0) ctx.fillRect(0, h * (1 - frac), w + 0.5, h * frac + 0.5);
+    else             ctx.fillRect(0, 0, w * frac + 0.5, h + 0.5);
   }
 
   // Visual-effect tuning.
@@ -759,7 +827,7 @@
       trail: []                 // recent positions for the comet motion trail
     };
   }
-  const TRAIL_LEN = 12;          // how many trail samples to keep
+  const TRAIL_LEN = 18;          // how many trail samples to keep (longer comet)
 
   function spawnSquares() {
     // Fair start: every square launches in the SAME direction (a fixed diagonal,
@@ -997,23 +1065,50 @@
     ctx.translate(sq.x, sq.y);
     ctx.rotate(sq.angle);
 
-    if (sq.isPlayer && !sq.eliminated) {
-      ctx.shadowColor = COLORS[sq.color]; ctx.shadowBlur = 16;
+    const r = 5; // rounded corners for a glossier look
+    const base = COLORS[sq.color];
+
+    // Drop shadow beneath the body for lift off the floor.
+    if (!sq.eliminated) {
+      ctx.save();
+      ctx.globalAlpha = sq.opacity * 0.30;
+      ctx.fillStyle = '#000';
+      roundRect(-half + 1.5, -half + 3, SQUARE_SIZE, SQUARE_SIZE, r); ctx.fill();
+      ctx.restore();
     }
-    const r = 4; // rounded corners for a glossier look
-    // Base body.
-    ctx.fillStyle = COLORS[sq.color];
+
+    // Outer glow — strong for the player, soft for everyone else.
+    ctx.shadowColor = base;
+    ctx.shadowBlur = (sq.isPlayer && !sq.eliminated) ? 18 : 8;
+
+    // Body: vertical gradient from a lighter tint down to a darker shade.
+    const lg = ctx.createLinearGradient(0, -half, 0, half);
+    lg.addColorStop(0, shade(base, 0.45));   // bright top
+    lg.addColorStop(0.5, base);
+    lg.addColorStop(1, shade(base, -0.32));  // dark bottom
+    ctx.fillStyle = lg;
     roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.fill();
     ctx.shadowBlur = 0;
-    // Top glossy highlight (lighter band across the upper half).
-    ctx.fillStyle = 'rgba(255,255,255,0.30)';
-    roundRect(-half + 2, -half + 2, SQUARE_SIZE - 4, SQUARE_SIZE * 0.42, r - 1); ctx.fill();
-    // Soft inner shadow at the bottom for depth.
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    roundRect(-half + 2, half - SQUARE_SIZE * 0.30, SQUARE_SIZE - 4, SQUARE_SIZE * 0.26, r - 1); ctx.fill();
+
+    // Glassy specular highlight: a soft radial sheen near the top-left.
+    const rg = ctx.createRadialGradient(-half * 0.35, -half * 0.45, 1, -half * 0.35, -half * 0.45, SQUARE_SIZE * 0.8);
+    rg.addColorStop(0, 'rgba(255,255,255,0.85)');
+    rg.addColorStop(0.35, 'rgba(255,255,255,0.25)');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = rg;
+    roundRect(-half + 1.5, -half + 1.5, SQUARE_SIZE - 3, SQUARE_SIZE * 0.55, r - 1); ctx.fill();
+
+    // Bright top edge line (rim light).
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-half + r, -half + 0.6);
+    ctx.lineTo(half - r, -half + 0.6);
+    ctx.stroke();
+
     // Crisp dark outline.
-    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = shade(base, -0.55);
+    ctx.lineWidth = 1.6;
     roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.stroke();
     ctx.restore();
 
@@ -1045,23 +1140,33 @@
     }
   }
 
-  // Comet trail: a tapering, fading streak behind the square in its own color.
+  // Comet trail: a smooth, glowing, tapering streak behind the square in its
+  // own color, drawn additively so overlapping segments bloom like light.
   function drawTrail(sq) {
     if (sq.eliminated || sq.finished || sq.trail.length < 2) return;
     const half = SQUARE_SIZE / 2;
+    const base = COLORS[sq.color];
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.globalCompositeOperation = 'lighter';
+    // soft wide glow pass
     for (let i = 1; i < sq.trail.length; i++) {
       const a = sq.trail[i - 1], b = sq.trail[i];
-      const f = i / sq.trail.length;            // 0 (old/tail) -> 1 (near body)
-      ctx.globalAlpha = f * 0.5;
-      ctx.strokeStyle = COLORS[sq.color];
-      ctx.lineWidth = Math.max(1, half * 1.4 * f);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
+      const f = i / sq.trail.length;            // 0 (tail) -> 1 (near body)
+      ctx.globalAlpha = f * f * 0.22;
+      ctx.strokeStyle = base;
+      ctx.lineWidth = Math.max(1, half * 2.1 * f);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    // bright thin core pass
+    for (let i = 1; i < sq.trail.length; i++) {
+      const a = sq.trail[i - 1], b = sq.trail[i];
+      const f = i / sq.trail.length;
+      ctx.globalAlpha = f * 0.55;
+      ctx.strokeStyle = shade(base, 0.35);
+      ctx.lineWidth = Math.max(1, half * 0.9 * f);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
     ctx.restore();
     ctx.globalAlpha = 1;
@@ -1165,12 +1270,18 @@
    * MAZE RENDERING (fills the whole screen)
    * ========================================================= */
   function drawMaze() {
-    // Floor fills the entire screen first (no dark bg visible).
-    ctx.fillStyle = '#e9edf2';
+    // Soft vertical gradient floor (subtle, premium look) fills the screen.
+    if (!MAZE._floorGrad) {
+      const fg = ctx.createLinearGradient(0, 0, 0, view.h);
+      fg.addColorStop(0, '#eef2f7');
+      fg.addColorStop(1, '#dde4ee');
+      MAZE._floorGrad = fg;
+    }
+    ctx.fillStyle = MAZE._floorGrad;
     ctx.fillRect(0, 0, view.w, view.h);
 
-    // Floor tint checker for readability.
-    ctx.fillStyle = 'rgba(60,80,110,0.05)';
+    // Faint corridor checker for readability (kept — user likes the floor).
+    ctx.fillStyle = 'rgba(60,80,110,0.045)';
     for (let r = 0; r < MAZE.rows; r++) {
       for (let c = 0; c < MAZE.cols; c++) {
         if (MAZE.grid[r][c] !== '#' && (r + c) % 2 === 0) {
@@ -1179,12 +1290,30 @@
       }
     }
 
-    // Walls.
+    // Walls: drop shadow + beveled gradient body + crisp edges for a 3D slab.
+    const wgrad = ctx.createLinearGradient(0, 0, 0, MAZE.cellH);
+    wgrad.addColorStop(0, '#3a3f5e');
+    wgrad.addColorStop(0.5, '#2b2f44');
+    wgrad.addColorStop(1, '#1d2031');
     for (const w of MAZE.walls) {
-      ctx.fillStyle = '#2b2f44';
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(w.x, w.y, w.w, 3); // top highlight
+      // soft contact shadow under the slab
+      ctx.fillStyle = 'rgba(20,24,40,0.22)';
+      ctx.fillRect(w.x + 1.5, w.y + 2.5, w.w, w.h);
+      // gradient body
+      ctx.save();
+      ctx.translate(w.x, w.y);
+      ctx.fillStyle = wgrad;
+      ctx.fillRect(0, 0, w.w + 0.5, w.h + 0.5);
+      ctx.restore();
+      // top bevel highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(w.x, w.y, w.w, Math.max(2, w.h * 0.10));
+      // left bevel highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(w.x, w.y, Math.max(2, w.w * 0.10), w.h);
+      // bottom/right inner shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillRect(w.x, w.y + w.h - Math.max(2, w.h * 0.10), w.w, Math.max(2, w.h * 0.10));
     }
 
     // Entry marker.
@@ -1231,34 +1360,40 @@
       const x = b.c * MAZE.cellW, y = b.r * MAZE.cellH;
       const w = MAZE.cellW, h = MAZE.cellH;
       const base = COLORS[b.color];
-      // base block, slightly darkened
-      ctx.fillStyle = base;
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300 + b.c + b.r);
+      // Gradient brick body: tinted but deep, so the color reads as "this gate
+      // belongs to that square" while still looking like solid masonry.
+      const bg = ctx.createLinearGradient(x, y, x, y + h);
+      bg.addColorStop(0, shade(base, 0.10));
+      bg.addColorStop(0.5, shade(base, -0.30));
+      bg.addColorStop(1, shade(base, -0.50));
+      ctx.fillStyle = bg;
       ctx.fillRect(x, y, w + 0.5, h + 0.5);
-      ctx.fillStyle = 'rgba(0,0,0,0.28)';
-      ctx.fillRect(x, y, w, h);
       // brick courses: mortar lines (offset every other row for a running bond)
-      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
       ctx.lineWidth = 1;
       const rows = 3, brickH = h / rows;
       for (let rr = 0; rr < rows; rr++) {
         const by = y + rr * brickH;
-        // horizontal mortar
         ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + w, by); ctx.stroke();
-        // vertical mortar, staggered
         const offset = (rr % 2 === 0) ? 0 : w / 2;
         for (let vx = offset; vx <= w; vx += w / 2) {
           ctx.beginPath(); ctx.moveTo(x + vx, by); ctx.lineTo(x + vx, by + brickH); ctx.stroke();
         }
       }
-      // colored top highlight so the color reads clearly even when dark
-      ctx.fillStyle = base;
-      ctx.globalAlpha = 0.55;
-      ctx.fillRect(x, y, w, 3);
-      ctx.globalAlpha = 1;
-      // outline
-      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5);
+      // bevel highlight + bottom shade
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.fillRect(x, y, w, Math.max(2, h * 0.08));
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x, y + h - Math.max(2, h * 0.08), w, Math.max(2, h * 0.08));
+      // GLOWING colored rim so you instantly read which color may pass.
+      ctx.save();
+      ctx.shadowColor = base;
+      ctx.shadowBlur = 6 + 5 * pulse;
+      ctx.strokeStyle = shade(base, 0.30);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1.25, y + 1.25, w - 2.5, h - 2.5);
+      ctx.restore();
     }
   }
 

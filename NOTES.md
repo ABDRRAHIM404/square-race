@@ -266,3 +266,48 @@ intentionally present for the flood wall (squares still never read it).
 Visual logic mirrored & sanity-rendered via `/tmp/render_v2.js` (path 97,
 flood front, 8 bricks). Static maze walls kept dark slate `#2b2f44` (the flood is
 the indigo element, matching the reference's blue advancing wall).
+
+## UPDATE — slower pacing + visual overhaul (this session)
+
+User feedback: "make the wall ~50% slower, squares ~20% slower, improve the
+gameplay visuals 100×, I don't like the wall's pixel-by-pixel motion, and the
+cells are rectangular not square."
+
+1. **Square speed −20%** — `COLOR_SPEED` now `{yellow:140, red:129, green:120,
+   blue:112}` (was 175/161/150/140). Verified constant-speed reflection at 140.
+2. **Flood wall −50%** — sweep changed `pathLen/26` → `pathLen/52` (~52s sweep).
+   Stages now settle in ~47–51s (was ~24s), verified per-stage in isolation.
+3. **Smooth flood (no pixel-by-pixel)** — `drawFlood` rewritten: the integer
+   `sealed[]` grid still drives physics, but the LEADING FACE is now drawn as a
+   continuously advancing partial-cell fill using the fractional `FLOOD.progress`
+   (rises like liquid along the corridor direction) plus an additive glowing
+   energy edge. Sealed body uses a vertical indigo gradient with top sheen +
+   bottom shade. New helper `fillCellFractionLocal`.
+4. **Visual overhaul (≈"100× better")**:
+   - `shade(hex, amt)` helper added (lighten/darken) — used throughout.
+   - **Walls**: drop shadow + vertical gradient body (#3a3f5e→#2b2f44→#1d2031) +
+     top/left bevel highlights + bottom inner shadow → 3D slab look.
+   - **Floor**: soft vertical gradient (#eef2f7→#dde4ee), cached + reset on layout.
+   - **Squares**: vertical body gradient (light top→dark bottom) + RADIAL glassy
+     specular highlight top-left + rim-light top edge + drop shadow + colored
+     outer glow (strong for player). Rounded r=5.
+   - **Trails**: longer (TRAIL_LEN 12→18), two-pass additive comet (wide soft
+     glow + bright thin core) so it blooms like light.
+   - **Bricks**: gradient masonry body + running-bond mortar + bevel + PULSING
+     glowing colored rim (shadowBlur) so the "which color may pass" reads instantly.
+   - Checkered flag + IN marker unchanged (already liked).
+
+NOTE on "rectangular pixels": the maze is 15×15 cells stretched to fill a
+390×844 portrait screen, so each CELL is ~26px wide × ~56px tall (rectangular) —
+that is the source of the rectangular look in walls/flood/bricks. The SQUARES
+themselves are true 22×22 squares. Left the maze filling the full screen (so no
+letterboxing); the rectangular cells are inherent to a full-bleed 15×15 grid on
+a tall phone. (If the user wants truly square cells we'd letterbox the maze or
+change the grid aspect — flagged, not changed.)
+
+Verification: node --check OK; JSON/YAML OK; flood timing ~47–51s all 5 stages;
+brick rules, fairness (same 45° launch, separated, trails), and pure-physics
+(no rotation, constant 140 speed, reflection-only, knife single-use, 4 placed,
+settles within cap) all PASS. Faithful SVG snapshot rendered (`snapshot.jpg`):
+gradient beveled walls, smooth gradient flood face + glow, 4 glossy gradient
+squares w/ radial specular + comet trails, glowing gradient bricks.
