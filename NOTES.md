@@ -416,3 +416,13 @@ all PASS. Snapshot re-rendered (snapshot.jpg): thin 5px wall lines, wide ~88%
 corridor floor, smaller solid squares.
 
 - User refinement applied: maze rendering now draws wall borders from the OPEN corridor cells themselves as ~4px outline segments only, so corridors read as wide open floor and non-flood wall cells are no longer visually perceived as filled blocks.
+
+- User refinement applied: non-flood maze wall physics now also matches the thin-line rendering, so the dark separators between corridor rows/columns are only ~4–6px actual blocking space instead of full-cell solid bands.
+
+- User refinement applied: flood now renders as one continuous inset indigo strip with no internal cell dividers/separators.
+
+- User refinement applied: loot is limited to exactly 1 knife and 1 shield per stage (when enough eligible cells exist).
+
+- User refinement applied: maze visual style keeps only corridor outline lines; no internal grid dividers are drawn inside open lanes.
+
+- User refinement applied: vertical dead space between horizontal corridor rows is compacted by about 70%, and the reclaimed space is redistributed into taller corridor lanes so rows sit closer together while corridors get slightly bigger.

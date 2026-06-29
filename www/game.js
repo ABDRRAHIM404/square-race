@@ -279,7 +279,8 @@
   const BG_COLOR = '#cdd6e3';    // letterbox background (above/below the maze)
   const FLOOR_COLOR = '#e9edf2'; // solid corridor floor
   const WALL_COLOR = '#2b2f44';  // thin wall separator lines
-  const WALL_THICKNESS = 5;      // px — walls are thin lines, not full cells
+  const WALL_THICKNESS = 4;      // px — walls are thin lines, not full cells
+  const ROW_COMPACT = 0.30;      // keep about 30% of old row spacing; rest fattens lanes
   const FLOOD_COLOR = '#3b32a6'; // solid advancing flood wall
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
   // Speeds reduced 30% from the original tuning so motion is easy to follow.
@@ -463,14 +464,19 @@
 
   // Compute pixel geometry so the maze fills the whole screen.
   function layoutMaze() {
-    // PERFECT SQUARE CELLS: size = screen width / columns, used for BOTH width
-    // and height. The maze will not fill the full screen height; the leftover
-    // space above and below is centered and filled with the background color.
+    // Keep the horizontal sizing from screen width, but compact the vertical
+    // gap between serpentine rows and redistribute that reclaimed space into the
+    // corridors themselves so lanes become taller while rows sit closer together.
     const cell = view.w / MAZE.cols;
     MAZE.cellW = cell;
     MAZE.cellH = cell;
+    MAZE.rowPitch = cell;
+    MAZE.rowGap = Math.max(4, (cell - WALL_THICKNESS) * ROW_COMPACT);
+    MAZE.laneH = cell - MAZE.rowGap;
+    MAZE.rowInset = (cell - MAZE.laneH) / 2;
+    MAZE.mazePixelH = MAZE.laneH + Math.max(0, MAZE.rows - 1) * MAZE.rowGap;
     MAZE.offX = 0;
-    MAZE.offY = Math.max(0, (view.h - cell * MAZE.rows) / 2); // vertical centering
+    MAZE.offY = Math.max(0, (view.h - MAZE.mazePixelH) / 2);
 
     MAZE.walls = [];
     let startCell = null, exitCell = null;
@@ -479,8 +485,8 @@
         const ch = MAZE.grid[r][c];
         if (ch === '#') {
           MAZE.walls.push({
-            x: MAZE.offX + c * MAZE.cellW, y: MAZE.offY + r * MAZE.cellH,
-            w: MAZE.cellW, h: MAZE.cellH
+            x: MAZE.offX + c * MAZE.cellW, y: MAZE.offY + r * MAZE.rowGap,
+            w: MAZE.cellW, h: MAZE.laneH
           });
         } else if (ch === 'S') {
           startCell = { c, r };
@@ -501,18 +507,32 @@
   }
 
   function cellCenter(c, r) {
-    return { x: MAZE.offX + c * MAZE.cellW + MAZE.cellW / 2, y: MAZE.offY + r * MAZE.cellH + MAZE.cellH / 2 };
+    return { x: MAZE.offX + c * MAZE.cellW + MAZE.cellW / 2, y: MAZE.offY + r * MAZE.rowGap + MAZE.laneH / 2 };
   }
 
   // Is the cell containing a pixel point a wall?
   // A cell is a wall if it's a layout wall ('#') OR it has been sealed by the
   // advancing blue flood wall behind the squares.
   function isWallAtPixel(px, py) {
-    const c = Math.floor((px - MAZE.offX) / MAZE.cellW);
-    const r = Math.floor((py - MAZE.offY) / MAZE.cellH);
-    if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
-    if (MAZE.grid[r][c] === '#') return true;
+    const localX = px - MAZE.offX;
+    const localY = py - MAZE.offY;
+    if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.mazePixelH) return true;
+    const c = Math.floor(localX / MAZE.cellW);
+    const brickCol = Math.floor(localX / MAZE.cellW);
+    const brickRow = Math.floor(localY / MAZE.rowGap);
+    const r = Math.max(0, Math.min(MAZE.rows - 1, brickRow));
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
+    if (MAZE.grid[r][c] !== '#') return false;
+    const inset = WALL_THICKNESS * 0.5;
+    const x0 = c * MAZE.cellW;
+    const y0 = r * MAZE.rowGap;
+    const x1 = x0 + MAZE.cellW;
+    const y1 = y0 + MAZE.laneH;
+    const open = (cc, rr) => rr >= 0 && cc >= 0 && rr < MAZE.rows && cc < MAZE.cols && MAZE.grid[rr][cc] !== '#';
+    if ((open(c, r - 1) || r === 0) && localY >= y0 - inset && localY <= y0 + inset && localX >= x0 && localX <= x1) return true;
+    if ((open(c, r + 1) || r === MAZE.rows - 1) && localY >= y1 - inset && localY <= y1 + inset && localX >= x0 && localX <= x1) return true;
+    if ((open(c - 1, r) || c === 0) && localX >= x0 - inset && localX <= x0 + inset && localY >= y0 && localY <= y1) return true;
+    if ((open(c + 1, r) || c === MAZE.cols - 1) && localX >= x1 - inset && localX <= x1 + inset && localY >= y0 && localY <= y1) return true;
     return false;
   }
 
@@ -521,20 +541,36 @@
   // the one whose color matches (that square is allowed to enter, which breaks
   // the brick). This is what makes break_match bricks act as colored gates.
   function isWallForSquare(px, py, sq) {
-    const c = Math.floor((px - MAZE.offX) / MAZE.cellW);
-    const r = Math.floor((py - MAZE.offY) / MAZE.cellH);
-    if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
-    if (MAZE.grid[r][c] === '#') return true;
+    const localX = px - MAZE.offX;
+    const localY = py - MAZE.offY;
+    if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.mazePixelH) return true;
+    const c = Math.floor(localX / MAZE.cellW);
+    const brickCol = Math.floor(localX / MAZE.cellW);
+    const brickRow = Math.floor(localY / MAZE.rowGap);
+    const r = Math.max(0, Math.min(MAZE.rows - 1, brickRow));
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
+    if (MAZE.grid[r][c] === '#') {
+      const inset = WALL_THICKNESS * 0.5;
+      const x0 = c * MAZE.cellW;
+      const y0 = r * MAZE.rowGap;
+      const x1 = x0 + MAZE.cellW;
+      const y1 = y0 + MAZE.laneH;
+      const open = (cc, rr) => rr >= 0 && cc >= 0 && rr < MAZE.rows && cc < MAZE.cols && MAZE.grid[rr][cc] !== '#';
+      if ((open(c, r - 1) || r === 0) && localY >= y0 - inset && localY <= y0 + inset && localX >= x0 && localX <= x1) return true;
+      if ((open(c, r + 1) || r === MAZE.rows - 1) && localY >= y1 - inset && localY <= y1 + inset && localX >= x0 && localX <= x1) return true;
+      if ((open(c - 1, r) || c === 0) && localX >= x0 - inset && localX <= x0 + inset && localY >= y0 && localY <= y1) return true;
+      if ((open(c + 1, r) || c === MAZE.cols - 1) && localX >= x1 - inset && localX <= x1 + inset && localY >= y0 && localY <= y1) return true;
+      return false;
+    }
     const brick = brickAt(c, r);
-    if (brick && brick.color !== sq.color) return true; // wrong color -> solid
+    if (brick) return brick.color !== sq.color;
     return false;
   }
 
   // If the square is overlapping a brick of its OWN color, shatter it open.
   function tryBreakBrick(sq) {
     const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
-    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
+    const r = Math.max(0, Math.min(MAZE.rows - 1, Math.floor((sq.y - MAZE.offY) / MAZE.rowGap)));
     const brick = brickAt(c, r);
     if (brick && brick.color === sq.color) {
       brick.broken = true;
@@ -621,7 +657,7 @@
   // Path index of the cell a square currently occupies (-1 if off-path).
   function squarePathIndex(sq) {
     const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
-    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
+    const r = Math.max(0, Math.min(MAZE.rows - 1, Math.floor((sq.y - MAZE.offY) / MAZE.rowGap)));
     for (let i = 0; i < MAZE.path.length; i++) {
       if (MAZE.path[i].c === c && MAZE.path[i].r === r) return i;
     }
@@ -687,45 +723,45 @@
 
   function drawFlood() {
     if (!MAZE.path.length) return;
-    const w = MAZE.cellW, h = MAZE.cellH;
+    const w = MAZE.cellW, h = MAZE.laneH;
     const ox = MAZE.offX, oy = MAZE.offY;
     const t = Date.now();
+    const inset = WALL_THICKNESS * 0.5;
+    const fw = Math.max(1, w - WALL_THICKNESS);
+    const fh = Math.max(1, h - WALL_THICKNESS);
 
-    // 1) Sealed body: ONE solid flat indigo color, no per-cell grid/sheen.
-    //    +1px overlap so sealed cells merge into a single seamless shape.
+    // One continuous solid strip inset inside the corridor so the maze outline
+    // remains visible and no internal cell separators appear inside the flood.
     ctx.fillStyle = FLOOD_COLOR;
     for (let i = 0; i < FLOOD.front; i++) {
       const cell = MAZE.path[i];
       if (!cell) continue;
-      ctx.fillRect(ox + cell.c * w, oy + cell.r * h, w + 1, h + 1);
+      ctx.fillRect(ox + cell.c * w + inset, oy + cell.r * h + inset, fw + 1, fh + 1);
     }
 
-    // 2) Continuous leading FACE: partially fill the current cell by the
-    //    fractional progress so the wall advances smoothly (not cell-by-cell).
     const frac = FLOOD.progress - Math.floor(FLOOD.progress);
     const lead = MAZE.path[FLOOD.front];
     const next = MAZE.path[Math.min(FLOOD.front + 1, MAZE.path.length - 1)];
     if (lead) {
-      const x = ox + lead.c * w, y = oy + lead.r * h;
+      const x = ox + lead.c * w + inset, y = oy + lead.r * h + inset;
       const dx = next ? Math.sign(next.c - lead.c) : 1;
       const dy = next ? Math.sign(next.r - lead.r) : 0;
       ctx.fillStyle = FLOOD_COLOR;
-      if (dx > 0)      ctx.fillRect(x, y, w * frac + 1, h + 1);
-      else if (dx < 0) ctx.fillRect(x + w * (1 - frac), y, w * frac + 1, h + 1);
-      else if (dy > 0) ctx.fillRect(x, y, w + 1, h * frac + 1);
-      else if (dy < 0) ctx.fillRect(x, y + h * (1 - frac), w + 1, h * frac + 1);
-      else             ctx.fillRect(x, y, w * frac + 1, h + 1);
+      if (dx > 0)      ctx.fillRect(x, y, fw * frac + 1, fh + 1);
+      else if (dx < 0) ctx.fillRect(x + fw * (1 - frac), y, fw * frac + 1, fh + 1);
+      else if (dy > 0) ctx.fillRect(x, y, fw + 1, fh * frac + 1);
+      else if (dy < 0) ctx.fillRect(x, y + fh * (1 - frac), fw + 1, fh * frac + 1);
+      else             ctx.fillRect(x, y, fw * frac + 1, fh + 1);
 
-      // Soft glowing leading edge so the advance reads (a single band, no grid).
       const pulse = 0.55 + 0.45 * Math.sin(t / 220);
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = `rgba(140,130,255,${0.16 + 0.16 * pulse})`;
-      const eT = Math.max(w, h) * 0.18 * (0.8 + 0.4 * pulse);
-      if (dx > 0)      ctx.fillRect(x + w * frac - eT, y, eT, h);
-      else if (dx < 0) ctx.fillRect(x + w * (1 - frac), y, eT, h);
-      else if (dy > 0) ctx.fillRect(x, y + h * frac - eT, w, eT);
-      else if (dy < 0) ctx.fillRect(x, y + h * (1 - frac), w, eT);
+      const eT = Math.max(fw, fh) * 0.18 * (0.8 + 0.4 * pulse);
+      if (dx > 0)      ctx.fillRect(x + fw * frac - eT, y, eT, fh);
+      else if (dx < 0) ctx.fillRect(x + fw * (1 - frac), y, eT, fh);
+      else if (dy > 0) ctx.fillRect(x, y + fh * frac - eT, fw, eT);
+      else if (dy < 0) ctx.fillRect(x, y + fh * (1 - frac), fw, eT);
       ctx.restore();
     }
   }
@@ -762,7 +798,7 @@
   // Burst brick-colored shards when a matching square smashes its brick.
   function spawnBrickShards(brick) {
     const cx = MAZE.offX + brick.c * MAZE.cellW + MAZE.cellW / 2;
-    const cy = MAZE.offY + brick.r * MAZE.cellH + MAZE.cellH / 2;
+    const cy = MAZE.offY + brick.r * MAZE.rowGap + MAZE.laneH / 2;
     const col = COLORS[brick.color];
     for (let i = 0; i < 10; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -949,7 +985,7 @@
 
     // Safety clamp to keep the square on-screen (the border is solid wall, so
     // this only guards against numerical drift — it does NOT change vx/vy).
-    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.mazePixelH;
     sq.x = Math.max(MAZE.offX + half, Math.min(MAZE.offX + mazeW - half, sq.x));
     sq.y = Math.max(MAZE.offY + half, Math.min(MAZE.offY + mazeH - half, sq.y));
   }
@@ -963,7 +999,7 @@
 
   function reachedExit(sq) {
     if (!MAZE.exit) return false;
-    return Math.hypot(sq.x - MAZE.exit.x, sq.y - MAZE.exit.y) < (MAZE.cellW + MAZE.cellH) / 4 + 2;
+    return Math.hypot(sq.x - MAZE.exit.x, sq.y - MAZE.exit.y) < (MAZE.cellW + MAZE.laneH) / 4 + 2;
   }
 
   function tryPickup(sq) {
@@ -1184,23 +1220,22 @@
   function placeLoot() {
     LOOT = [];
     const open = listOpenCells();
-    // Avoid spawning right on top of the start cluster.
     const usable = open.filter(cell => {
       const ctr = cellCenter(cell.c, cell.r);
       return Math.hypot(ctr.x - MAZE.start.x, ctr.y - MAZE.start.y) > Math.max(MAZE.cellW, MAZE.cellH) * 1.5;
     });
-    // Shuffle (seeded).
     for (let i = usable.length - 1; i > 0; i--) {
       const j = Math.floor(rand() * (i + 1));
       [usable[i], usable[j]] = [usable[j], usable[i]];
     }
-    const count = Math.min(usable.length, 5 + Math.floor(rand() * 3)); // 5-7 items
-    for (let i = 0; i < count; i++) {
-      const cell = usable[i];
-      const ctr = cellCenter(cell.c, cell.r);
-      // ~55% knives, ~45% shields.
-      const type = rand() < 0.55 ? 'knife' : 'shield';
-      LOOT.push({ x: ctr.x, y: ctr.y, type, taken: false });
+    const picks = usable.slice(0, Math.min(usable.length, 2));
+    if (picks[0]) {
+      const ctr = cellCenter(picks[0].c, picks[0].r);
+      LOOT.push({ x: ctr.x, y: ctr.y, type: 'knife', taken: false });
+    }
+    if (picks[1]) {
+      const ctr = cellCenter(picks[1].c, picks[1].r);
+      LOOT.push({ x: ctr.x, y: ctr.y, type: 'shield', taken: false });
     }
   }
 
@@ -1261,7 +1296,7 @@
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, view.w, view.h);
 
-    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.mazePixelH;
 
     // 2) FLOOR: one solid flat color, covering ONLY the maze area. No checker,
     //    no grid, no cell lines.
@@ -1273,13 +1308,13 @@
     //    instead of visually suggesting that wall cells are filled blocks.
     const T = 4;
     const inset = T / 2;
-    const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.cellH;
+    const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.laneH, pitch = MAZE.rowGap;
     const isOpenCell = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
     ctx.fillStyle = WALL_COLOR;
     for (let r = 0; r < MAZE.rows; r++) {
       for (let c = 0; c < MAZE.cols; c++) {
         if (!isOpenCell(c, r)) continue;
-        const x = ox + c * cw, y = oy + r * ch;
+        const x = ox + c * cw, y = oy + r * pitch;
         if (!isOpenCell(c, r - 1)) ctx.fillRect(x, y - inset, cw, T);
         if (!isOpenCell(c, r + 1)) ctx.fillRect(x, y + ch - inset, cw, T);
         if (!isOpenCell(c - 1, r)) ctx.fillRect(x - inset, y, T, ch);
@@ -1290,7 +1325,7 @@
     // Entry marker: a solid translucent tint + label (no grid).
     if (MAZE.start) {
       ctx.fillStyle = 'rgba(46,204,113,0.28)';
-      ctx.fillRect(MAZE.start.x - MAZE.cellW / 2, MAZE.start.y - MAZE.cellH / 2, MAZE.cellW, MAZE.cellH);
+      ctx.fillRect(MAZE.start.x - MAZE.cellW / 2, MAZE.start.y - MAZE.laneH / 2, MAZE.cellW, MAZE.laneH);
       ctx.fillStyle = '#2ecc71';
       ctx.font = `bold ${MAZE.cellW * 0.42}px monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1298,7 +1333,7 @@
     }
     // Exit marker: a checkered finish flag filling the exit cell.
     if (MAZE.exitCell) {
-      drawCheckeredFlag(MAZE.offX + MAZE.exitCell.c * MAZE.cellW, MAZE.offY + MAZE.exitCell.r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
+      drawCheckeredFlag(MAZE.offX + MAZE.exitCell.c * MAZE.cellW, MAZE.offY + MAZE.exitCell.r * MAZE.rowGap, MAZE.cellW, MAZE.laneH);
     }
     ctx.textBaseline = 'alphabetic';
   }
@@ -1329,7 +1364,7 @@
       // Skip if the flood has already swallowed this cell (flood draws over it).
       if (FLOOD.sealed[b.r] && FLOOD.sealed[b.r][b.c]) continue;
       const x = MAZE.offX + b.c * MAZE.cellW, y = MAZE.offY + b.r * MAZE.cellH;
-      const w = MAZE.cellW, h = MAZE.cellH;
+      const w = MAZE.cellW, h = MAZE.laneH;
       const base = COLORS[b.color];
       const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300 + b.c + b.r);
       // Solid flat colored block (this gate's color). NO mortar/grid/bevel lines.
