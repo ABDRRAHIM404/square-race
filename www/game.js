@@ -270,7 +270,7 @@
   /* =========================================================
    * SHARED CONSTANTS
    * ========================================================= */
-  const SQUARE_SIZE = 22;
+  const SQUARE_SIZE = 18; // reduced 20% from 22
   const COLORS = {
     yellow: '#FFD700', blue: '#4169E1', green: '#228B22', red: '#CC0000'
   };
@@ -278,7 +278,8 @@
   // Flat solid game colors — NO gradients/checker/grid so nothing reveals cells.
   const BG_COLOR = '#cdd6e3';    // letterbox background (above/below the maze)
   const FLOOR_COLOR = '#e9edf2'; // solid corridor floor
-  const WALL_COLOR = '#2b2f44';  // solid wall blocks
+  const WALL_COLOR = '#2b2f44';  // thin wall separator lines
+  const WALL_THICKNESS = 5;      // px — walls are thin lines, not full cells
   const FLOOD_COLOR = '#3b32a6'; // solid advancing flood wall
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
   // Speeds reduced 30% from the original tuning so motion is easy to follow.
@@ -1267,13 +1268,23 @@
     ctx.fillStyle = FLOOR_COLOR;
     ctx.fillRect(MAZE.offX, MAZE.offY, mazeW, mazeH);
 
-    // 3) WALLS: solid dark blocks with NO cell borders, bevels, or highlights.
-    //    Each wall cell is filled with the exact same flat color and no stroke,
-    //    so adjacent wall cells merge into one seamless solid shape.
+    // 3) WALLS: draw ONLY thin outline segments around OPEN corridor cells.
+    //    This makes the maze read as mostly open floor with dark separators,
+    //    instead of visually suggesting that wall cells are filled blocks.
+    const T = 4;
+    const inset = T / 2;
+    const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.cellH;
+    const isOpenCell = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
     ctx.fillStyle = WALL_COLOR;
-    for (const w of MAZE.walls) {
-      // +1px overlap guarantees no hairline seam shows between adjacent cells.
-      ctx.fillRect(w.x, w.y, w.w + 1, w.h + 1);
+    for (let r = 0; r < MAZE.rows; r++) {
+      for (let c = 0; c < MAZE.cols; c++) {
+        if (!isOpenCell(c, r)) continue;
+        const x = ox + c * cw, y = oy + r * ch;
+        if (!isOpenCell(c, r - 1)) ctx.fillRect(x, y - inset, cw, T);
+        if (!isOpenCell(c, r + 1)) ctx.fillRect(x, y + ch - inset, cw, T);
+        if (!isOpenCell(c - 1, r)) ctx.fillRect(x - inset, y, T, ch);
+        if (!isOpenCell(c + 1, r)) ctx.fillRect(x + cw - inset, y, T, ch);
+      }
     }
 
     // Entry marker: a solid translucent tint + label (no grid).

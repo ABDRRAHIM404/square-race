@@ -386,3 +386,33 @@ timing ~80s all 5 (under 120s cap); bricks, fairness, pure-physics all PASS
 count is now ~10/stage (longer paths). Snapshot re-rendered (snapshot.jpg):
 solid flat floor/walls/flood/bricks, plain solid squares, square cells,
 centered maze with background letterbox.
+
+## UPDATE — thin walls + smaller squares (this session)
+
+User: walls should be THIN lines (4-6px) between corridors like the original
+game, not thick full-cell blocks; corridor floor should fill almost the entire
+cell with only a thin dark separator line. Also reduce square size 20%.
+
+Done:
+1. **Thin wall lines** — `drawMaze` walls section rewritten. Instead of filling
+   each '#' cell solid, it now draws a thin `WALL_THICKNESS = 5`px line only on
+   the edges of a wall cell that border an OPEN/corridor cell (or the outer maze
+   border), straddling the boundary. The corridor floor fills ~88% of the cell;
+   the wall is just a thin separator line. IMPORTANT: physics is UNCHANGED — a
+   '#' cell is still fully solid in isWallAtPixel/isWallForSquare, so squares
+   bounce exactly at the boundary where the thin line sits (the line IS the wall
+   they hit). Verified: wall-cell interior reads solid, corridor interior reads
+   passable, all timing/brick/fairness/physics tests still pass.
+   - Flood + bricks still fill the full path cell (they're the wall/gate filling
+     the wide corridor edge-to-edge, matching the reference's blue wall sweep);
+     they draw over the thin separator lines along the corridor as they advance.
+2. **Square size -20%** — `SQUARE_SIZE` 22 -> 18.
+
+Verification (/tmp/verify*.js, rebuilt after /tmp was cleared): SQUARE_SIZE=18;
+cells still perfect squares (43.33) all 5; flood settles ~76-80s all 5 (under
+120s cap); pure physics (constant speed, reflection, no rotation); thin-wall
+collision (wall solid / corridor passable); brick gates (wrong=wall, match=pass)
+all PASS. Snapshot re-rendered (snapshot.jpg): thin 5px wall lines, wide ~88%
+corridor floor, smaller solid squares.
+
+- User refinement applied: maze rendering now draws wall borders from the OPEN corridor cells themselves as ~4px outline segments only, so corridors read as wide open floor and non-flood wall cells are no longer visually perceived as filled blocks.
