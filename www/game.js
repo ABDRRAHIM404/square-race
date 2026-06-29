@@ -60,6 +60,25 @@
     ctx.closePath();
   }
 
+  // Lighten (amt>0) or darken (amt<0) a #rrggbb hex color by a 0..1 fraction.
+  function shade(hex, amt) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    let r = parseInt(h.slice(0, 2), 16);
+    let g = parseInt(h.slice(2, 4), 16);
+    let b = parseInt(h.slice(4, 6), 16);
+    if (amt >= 0) {
+      r = Math.round(r + (255 - r) * amt);
+      g = Math.round(g + (255 - g) * amt);
+      b = Math.round(b + (255 - b) * amt);
+    } else {
+      const k = 1 + amt; // amt negative
+      r = Math.round(r * k); g = Math.round(g * k); b = Math.round(b * k);
+    }
+    const to2 = v => ('0' + Math.max(0, Math.min(255, v)).toString(16)).slice(-2);
+    return '#' + to2(r) + to2(g) + to2(b);
+  }
+
   /* ---------------------------------------------------------
    * Seeded PRNG — mulberry32
    * ------------------------------------------------------- */
@@ -251,14 +270,21 @@
   /* =========================================================
    * SHARED CONSTANTS
    * ========================================================= */
-  const SQUARE_SIZE = 22;
+  const SQUARE_SIZE = 18; // reduced 20% from 22
   const COLORS = {
     yellow: '#FFD700', blue: '#4169E1', green: '#228B22', red: '#CC0000'
   };
   const COLOR_ORDER = ['yellow', 'blue', 'green', 'red'];
+  // Flat solid game colors — NO gradients/checker/grid so nothing reveals cells.
+  const BG_COLOR = '#cdd6e3';    // letterbox background (above/below the maze)
+  const FLOOR_COLOR = '#e9edf2'; // solid corridor floor
+  const WALL_COLOR = '#2b2f44';  // thin wall separator lines
+  const WALL_THICKNESS = 4;      // px — walls are thin lines, not full cells
+  const FLOOD_COLOR = '#3b32a6'; // solid advancing flood wall
   // Per-color base speed (px/sec). Yellow fastest .. blue slowest.
   // Speeds reduced 30% from the original tuning so motion is easy to follow.
-  const COLOR_SPEED = { yellow: 175, red: 161, green: 150, blue: 140 };
+  // Per-color base speeds (already 30% reduced earlier, now a further 20% slower).
+  const COLOR_SPEED = { yellow: 140, red: 129, green: 120, blue: 112 };
 
   /* =========================================================
    * MAZE LAYOUTS (hardcoded, 5 SINGLE-PATH designs)
@@ -276,95 +302,113 @@
    * degree >= 3; exactly two degree-1 endpoints: S and E).
    * ========================================================= */
   const MAZE_LAYOUTS = [
-    // 1 — horizontal serpentine (wide switchback corridor)
+    // Maze grid is 9 wide so cells are large (wide floor). Cells are rendered as
+    // PERFECT SQUARES (size = screenWidth/9) and the maze is taller now so it
+    // fills most of the portrait screen; any leftover space is the centered,
+    // background-colored letterbox. All 5 are validated single-path (S->E).
+    // 1 — thicker lanes with 2x2 turn connectors and no brick gates for now (9x17)
     [
-      '###############',
-      '#S............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#............E#',
-      '###############'
+      '#########',
+      '#S.....##',
+      '#......##',
+      '#####..##',
+      '#.......#',
+      '#.......#',
+      '##..#####',
+      '##......#',
+      '#.......#',
+      '#####..##',
+      '#.......#',
+      '#.......#',
+      '##..#####',
+      '##......#',
+      '#.......#',
+      '#E......#',
+      '#########'
     ],
-    // 2 — vertical serpentine (narrow weaving lanes)
+    // 2 — vertical weaving lanes (9x17)
     [
-      '###############',
-      '#S#...#...#...#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#.#.#.#.#.#.#.#',
-      '#...#...#...#E#',
-      '###############'
+      '#########',
+      '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#...#...#',
+      '#########'
     ],
-    // 3 — horizontal serpentine, flipped (start bottom, exit top)
+    // 3 — horizontal serpentine, mirrored (start top-right)
     [
-      '###############',
-      '#............E#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#S............#',
-      '###############'
+      '#########',
+      '#......S#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#......E#',
+      '#########'
     ],
-    // 4 — wide vertical lanes (thick pillars between lanes)
+    // 4 — longer horizontal serpentine (9x19)
     [
-      '###############',
-      '#S##....##....#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#.##.##.##.##.#',
-      '#....##....##E#',
-      '###############'
+      '#########',
+      '#S......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#.......#',
+      '#######.#',
+      '#.......#',
+      '#.#######',
+      '#......E#',
+      '#########'
     ],
-    // 5 — double-thick horizontal serpentine (longer winding run)
+    // 5 — longer vertical weaving lanes (9x19)
     [
-      '###############',
-      '#S............#',
-      '#############.#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.#############',
-      '#.............#',
-      '#############.#',
-      '#############.#',
-      '#.............#',
-      '#.#############',
-      '#.#############',
-      '#............E#',
-      '###############'
+      '#########',
+      '#S#...#E#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '#...#...#',
+      '#########'
     ]
   ];
 
@@ -378,8 +422,36 @@
     exit: null,      // {x,y} pixel center of exit + {cx,cy} cell
     exitCell: null,
     startCell: null,
+    path: [],        // ordered corridor cells S..E (for the advancing wall ONLY)
     walls: []        // pixel rects [{x,y,w,h}] for internal+border walls
   };
+
+  // Walk the single corridor from S to E, returning the ordered cell list.
+  // NOTE: this is used ONLY by the advancing blue wall (to know which cell to
+  // seal next). The squares themselves never read this — their motion stays
+  // pure billiard physics with zero knowledge of the path or the exit.
+  function computePath() {
+    const path = [];
+    if (!MAZE.startCell || !MAZE.exitCell) return path;
+    const isOpen = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
+    let c = MAZE.startCell.c, r = MAZE.startCell.r;
+    let pc = -1, pr = -1;
+    const guard = MAZE.rows * MAZE.cols + 5;
+    for (let i = 0; i < guard; i++) {
+      path.push({ c, r });
+      if (c === MAZE.exitCell.c && r === MAZE.exitCell.r) break;
+      const nbrs = [[c, r - 1], [c, r + 1], [c - 1, r], [c + 1, r]];
+      let next = null;
+      for (const [nc, nr] of nbrs) {
+        if (!isOpen(nc, nr)) continue;
+        if (nc === pc && nr === pr) continue;
+        next = [nc, nr]; break;
+      }
+      if (!next) break;
+      pc = c; pr = r; c = next[0]; r = next[1];
+    }
+    return path;
+  }
 
   function loadStage(index) {
     const layout = MAZE_LAYOUTS[index % MAZE_LAYOUTS.length];
@@ -391,10 +463,14 @@
 
   // Compute pixel geometry so the maze fills the whole screen.
   function layoutMaze() {
-    MAZE.cellW = view.w / MAZE.cols;
-    MAZE.cellH = view.h / MAZE.rows;
+    // PERFECT SQUARE CELLS: size = screen width / columns, used for BOTH width
+    // and height. The maze will not fill the full screen height; the leftover
+    // space above and below is centered and filled with the background color.
+    const cell = view.w / MAZE.cols;
+    MAZE.cellW = cell;
+    MAZE.cellH = cell;
     MAZE.offX = 0;
-    MAZE.offY = 0;
+    MAZE.offY = Math.max(0, (view.h - cell * MAZE.rows) / 2); // vertical centering
 
     MAZE.walls = [];
     let startCell = null, exitCell = null;
@@ -403,7 +479,7 @@
         const ch = MAZE.grid[r][c];
         if (ch === '#') {
           MAZE.walls.push({
-            x: c * MAZE.cellW, y: r * MAZE.cellH,
+            x: MAZE.offX + c * MAZE.cellW, y: MAZE.offY + r * MAZE.cellH,
             w: MAZE.cellW, h: MAZE.cellH
           });
         } else if (ch === 'S') {
@@ -421,19 +497,266 @@
       MAZE.exitCell = exitCell;
       MAZE.exit = cellCenter(exitCell.c, exitCell.r);
     }
+    MAZE.path = computePath();
   }
 
   function cellCenter(c, r) {
-    return { x: c * MAZE.cellW + MAZE.cellW / 2, y: r * MAZE.cellH + MAZE.cellH / 2 };
+    return { x: MAZE.offX + c * MAZE.cellW + MAZE.cellW / 2, y: MAZE.offY + r * MAZE.cellH + MAZE.cellH / 2 };
   }
 
   // Is the cell containing a pixel point a wall?
+  // A cell is a wall if it's a layout wall ('#') OR it has been sealed by the
+  // advancing blue flood wall behind the squares.
   function isWallAtPixel(px, py) {
-    const c = Math.floor(px / MAZE.cellW);
-    const r = Math.floor(py / MAZE.cellH);
-    if (r < 0 || c < 0 || r >= MAZE.rows || c >= MAZE.cols) return true;
-    return MAZE.grid[r][c] === '#';
+    const localX = px - MAZE.offX;
+    const localY = py - MAZE.offY;
+    if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
+    const c = Math.floor(localX / MAZE.cellW);
+    const r = Math.floor(localY / MAZE.cellH);
+    if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
+    if (MAZE.grid[r][c] !== '#') return false;
+    const inset = WALL_THICKNESS * 0.5;
+    const x0 = c * MAZE.cellW;
+    const y0 = r * MAZE.cellH;
+    const x1 = x0 + MAZE.cellW;
+    const y1 = y0 + MAZE.cellH;
+    const open = (cc, rr) => rr >= 0 && cc >= 0 && rr < MAZE.rows && cc < MAZE.cols && MAZE.grid[rr][cc] !== '#';
+    if ((open(c, r - 1) || r === 0) && localY >= y0 - inset && localY <= y0 + inset && localX >= x0 && localX <= x1) return true;
+    if ((open(c, r + 1) || r === MAZE.rows - 1) && localY >= y1 - inset && localY <= y1 + inset && localX >= x0 && localX <= x1) return true;
+    if ((open(c - 1, r) || c === 0) && localX >= x0 - inset && localX <= x0 + inset && localY >= y0 && localY <= y1) return true;
+    if ((open(c + 1, r) || c === MAZE.cols - 1) && localX >= x1 - inset && localX <= x1 + inset && localY >= y0 && localY <= y1) return true;
+    return false;
   }
+
+  // Per-square wall test used by the squares' physics. Identical to
+  // isWallAtPixel, but an unbroken colored brick blocks every square EXCEPT
+  // the one whose color matches (that square is allowed to enter, which breaks
+  // the brick). This is what makes break_match bricks act as colored gates.
+  function isWallForSquare(px, py, sq) {
+    const localX = px - MAZE.offX;
+    const localY = py - MAZE.offY;
+    if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
+    const c = Math.floor(localX / MAZE.cellW);
+    const r = Math.floor(localY / MAZE.cellH);
+    if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
+    if (MAZE.grid[r][c] === '#') {
+      const inset = WALL_THICKNESS * 0.5;
+      const x0 = c * MAZE.cellW;
+      const y0 = r * MAZE.cellH;
+      const x1 = x0 + MAZE.cellW;
+      const y1 = y0 + MAZE.cellH;
+      const open = (cc, rr) => rr >= 0 && cc >= 0 && rr < MAZE.rows && cc < MAZE.cols && MAZE.grid[rr][cc] !== '#';
+      if ((open(c, r - 1) || r === 0) && localY >= y0 - inset && localY <= y0 + inset && localX >= x0 && localX <= x1) return true;
+      if ((open(c, r + 1) || r === MAZE.rows - 1) && localY >= y1 - inset && localY <= y1 + inset && localX >= x0 && localX <= x1) return true;
+      if ((open(c - 1, r) || c === 0) && localX >= x0 - inset && localX <= x0 + inset && localY >= y0 && localY <= y1) return true;
+      if ((open(c + 1, r) || c === MAZE.cols - 1) && localX >= x1 - inset && localX <= x1 + inset && localY >= y0 && localY <= y1) return true;
+      return false;
+    }
+    const brick = brickAt(c, r);
+    if (brick) return brick.color !== sq.color;
+    return false;
+  }
+
+  // If the square is overlapping a brick of its OWN color, shatter it open.
+  function tryBreakBrick(sq) {
+    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
+    const brick = brickAt(c, r);
+    if (brick && brick.color === sq.color) {
+      brick.broken = true;
+      brick.hitFlash = 1;
+      spawnBrickShards(brick);
+      GameAudio.playBounce();
+    }
+  }
+
+  /* =========================================================
+   * ADVANCING BLUE WALL ("flood")
+   *
+   * A blue wall grows cell-by-cell ALONG the single corridor from the start,
+   * sealing the path behind the squares. This is what guarantees the squares
+   * keep moving forward and reach the exit while their motion stays PURE
+   * billiard physics (they never steer — the wall just squeezes them ahead).
+   *
+   * Rule: the flood only PUSHES, it never catches/eliminates. It will not seal
+   * the cell that the rearmost still-active square currently occupies (or any
+   * cell ahead of it), so a square is always kept just ahead of the wall front.
+   * ========================================================= */
+  const FLOOD = {
+    sealed: [],       // sealed[r][c] = true if cell (c,r) is now a blue wall
+    front: 0,         // how many path cells (from start) are sealed
+    progress: 0,      // fractional progress used for smooth advance
+    speedCells: 0     // path-cells sealed per second (set per stage)
+  };
+
+  /* ---------------------------------------------------------
+   * COLORED BRICK WALLS (break_match)
+   * Some corridor cells hold a brick tinted one square's color. ONLY the
+   * matching-color square can break/pass through it; every other square (and
+   * the player) treats it as a solid wall and bounces off. When the matching
+   * square touches it, the brick shatters (opens) for everyone.
+   * Bricks are placed ON path cells, spaced out, so they form breakable gates
+   * along the single corridor. The advancing flood guarantees that even a
+   * square stuck behind a brick it cannot break gets pushed onward, so no
+   * square is ever permanently trapped.
+   * ------------------------------------------------------- */
+  let BRICKS = []; // [{ c, r, color, broken, hitFlash }]
+
+  function brickAt(c, r) {
+    for (const b of BRICKS) {
+      if (!b.broken && b.c === c && b.r === r) return b;
+    }
+    return null;
+  }
+
+  function resetBricks() {
+    BRICKS = [];
+    if (STATE.stageIndex === 0) return; // Stage 1: remove brick gates for now
+    const path = MAZE.path;
+    if (!path || path.length < 8) return;
+    // Place bricks on interior path cells, evenly spaced, skipping cells near
+    // the start/exit so those stay clear. Rotate the four colors so each
+    // square has gates only it can pass.
+    const colors = COLOR_ORDER;
+    const margin = 3;
+    let colorIdx = 0;
+    const spacing = 6;
+    for (let i = margin; i < path.length - margin; i += spacing) {
+      const cell = path[i];
+      if (MAZE.startCell && cell.c === MAZE.startCell.c && cell.r === MAZE.startCell.r) continue;
+      if (MAZE.exitCell && cell.c === MAZE.exitCell.c && cell.r === MAZE.exitCell.r) continue;
+      BRICKS.push({
+        c: cell.c, r: cell.r,
+        color: colors[colorIdx % colors.length],
+        broken: false,
+        hitFlash: 0
+      });
+      colorIdx++;
+    }
+  }
+
+  function resetFlood() {
+    FLOOD.sealed = Array.from({ length: MAZE.rows }, () => new Array(MAZE.cols).fill(false));
+    FLOOD.front = 0;
+    FLOOD.progress = 0;
+    // Tune the advance so a stage finishes in a watchable time: cover the whole
+    // path over roughly the available race window.
+    const pathLen = Math.max(1, MAZE.path.length);
+    FLOOD.speedCells = (STATE.stageIndex === 0 ? pathLen / 68 : pathLen / 87); // Stage 1 denser layout gets a slightly faster sweep; others stay at ~87s
+  }
+
+  // Path index of the cell a square currently occupies (-1 if off-path).
+  function squarePathIndex(sq) {
+    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
+    const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
+    for (let i = 0; i < MAZE.path.length; i++) {
+      if (MAZE.path[i].c === c && MAZE.path[i].r === r) return i;
+    }
+    return -1;
+  }
+
+  function updateFlood(dt) {
+    if (!MAZE.path.length) return;
+
+    // The flood advances steadily regardless of where squares are — it is the
+    // "piston" that drives the race. The squares still move with pure billiard
+    // physics; the flood simply seals the corridor behind them.
+    FLOOD.progress += FLOOD.speedCells * dt;
+    const want = Math.min(MAZE.path.length, Math.floor(FLOOD.progress));
+    while (FLOOD.front < want) {
+      const cell = MAZE.path[FLOOD.front];
+      if (cell) {
+        FLOOD.sealed[cell.r][cell.c] = true;
+        // A brick swallowed by the flood is gone (it becomes part of the wall).
+        const b = brickAt(cell.c, cell.r);
+        if (b) b.broken = true;
+      }
+      FLOOD.front++;
+    }
+
+    // PUSH (never catch): any active square that is in or behind the sealed
+    // front gets relocated just ahead of the front and re-launched forward,
+    // so the wall keeps it moving but never swallows it.
+    for (const sq of SQUARES) {
+      if (sq.finished || sq.eliminated) continue;
+      const idx = squarePathIndex(sq);
+      // If the square's cell is sealed, or it sits at/behind the front, bump it
+      // forward to the first open path cell ahead of the front.
+      if (idx === -1 || idx < FLOOD.front) {
+        // Find the first open path cell ahead of the front that this square is
+        // allowed to occupy (not blocked by an unbroken brick of another color),
+        // so the push never drops it inside a gate it cannot pass.
+        let aheadIdx = Math.min(FLOOD.front + 1, MAZE.path.length - 1);
+        while (aheadIdx < MAZE.path.length - 1) {
+          const pc = MAZE.path[aheadIdx];
+          const b = brickAt(pc.c, pc.r);
+          if (b && b.color !== sq.color) { aheadIdx++; continue; }
+          break;
+        }
+        const ahead = MAZE.path[aheadIdx];
+        const nextAhead = MAZE.path[Math.min(aheadIdx + 1, MAZE.path.length - 1)];
+        const ctr = cellCenter(ahead.c, ahead.r);
+        sq.x = ctr.x; sq.y = ctr.y;
+        // Re-aim along the corridor's forward direction but KEEP it a billiard
+        // diagonal so it still bounces naturally (this is the wall shoving it,
+        // not pathfinding — it only happens when the wall reaches the square).
+        const fwd = stepDir(ahead, nextAhead);
+        // preserve diagonal liveliness: combine forward dir with a perpendicular
+        const perp = { x: -fwd.y, y: fwd.x };
+        const sign = (sq.vx * perp.x + sq.vy * perp.y) >= 0 ? 1 : -1;
+        let dx = fwd.x + perp.x * sign * 0.7, dy = fwd.y + perp.y * sign * 0.7;
+        const d = Math.hypot(dx, dy) || 1;
+        sq.vx = (dx / d) * sq.speed;
+        sq.vy = (dy / d) * sq.speed;
+      }
+    }
+  }
+
+  function drawFlood() {
+    if (!MAZE.path.length) return;
+    const w = MAZE.cellW, h = MAZE.cellH;
+    const ox = MAZE.offX, oy = MAZE.offY;
+    const t = Date.now();
+    const inset = WALL_THICKNESS * 0.5;
+    const fw = Math.max(1, w - WALL_THICKNESS);
+    const fh = Math.max(1, h - WALL_THICKNESS);
+
+    // One continuous solid strip inset inside the corridor so the maze outline
+    // remains visible and no internal cell separators appear inside the flood.
+    ctx.fillStyle = FLOOD_COLOR;
+    for (let i = 0; i < FLOOD.front; i++) {
+      const cell = MAZE.path[i];
+      if (!cell) continue;
+      ctx.fillRect(ox + cell.c * w + inset, oy + cell.r * h + inset, fw + 1, fh + 1);
+    }
+
+    const frac = FLOOD.progress - Math.floor(FLOOD.progress);
+    const lead = MAZE.path[FLOOD.front];
+    const next = MAZE.path[Math.min(FLOOD.front + 1, MAZE.path.length - 1)];
+    if (lead) {
+      const x = ox + lead.c * w + inset, y = oy + lead.r * h + inset;
+      const dx = next ? Math.sign(next.c - lead.c) : 1;
+      const dy = next ? Math.sign(next.r - lead.r) : 0;
+      ctx.fillStyle = FLOOD_COLOR;
+      if (dx > 0)      ctx.fillRect(x, y, fw * frac + 1, fh + 1);
+      else if (dx < 0) ctx.fillRect(x + fw * (1 - frac), y, fw * frac + 1, fh + 1);
+      else if (dy > 0) ctx.fillRect(x, y, fw + 1, fh * frac + 1);
+      else if (dy < 0) ctx.fillRect(x, y + fh * (1 - frac), fw + 1, fh * frac + 1);
+      else             ctx.fillRect(x, y, fw * frac + 1, fh + 1);
+
+      const pulse = 0.55 + 0.45 * Math.sin(t / 220);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(140,130,255,${0.16 + 0.16 * pulse})`;
+      const eT = Math.max(fw, fh) * 0.18 * (0.8 + 0.4 * pulse);
+      if (dx > 0)      ctx.fillRect(x + fw * frac - eT, y, eT, fh);
+      else if (dx < 0) ctx.fillRect(x + fw * (1 - frac), y, eT, fh);
+      else if (dy > 0) ctx.fillRect(x, y + fh * frac - eT, fw, eT);
+      else if (dy < 0) ctx.fillRect(x, y + fh * (1 - frac), fw, eT);
+      ctx.restore();
+    }
+  }
+
 
   // Visual-effect tuning.
   const SHIELD_FLASH_TIME = 0.5; // seconds for the blue shield ripple
@@ -458,6 +781,28 @@
         maxLife: 0.85,
         color,
         spin: (Math.random() - 0.5) * 16,
+        angle: Math.random() * Math.PI
+      });
+    }
+  }
+
+  // Burst brick-colored shards when a matching square smashes its brick.
+  function spawnBrickShards(brick) {
+    const cx = MAZE.offX + brick.c * MAZE.cellW + MAZE.cellW / 2;
+    const cy = MAZE.offY + brick.r * MAZE.cellH + MAZE.cellH / 2;
+    const col = COLORS[brick.color];
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 140;
+      PARTICLES.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        size: 4 + Math.random() * 5,
+        life: 0.4 + Math.random() * 0.3,
+        maxLife: 0.7,
+        color: col,
+        spin: (Math.random() - 0.5) * 14,
         angle: Math.random() * Math.PI
       });
     }
@@ -509,23 +854,59 @@
       opacity: 1,
       isPlayer: false,
       item: null,               // null | 'knife' | 'shield'
-      shieldFlash: 0            // >0 while the blue shield-block ripple plays
+      shieldFlash: 0,           // >0 while the blue shield-block ripple plays
+      trail: []                 // recent positions for the comet motion trail
     };
   }
+  const TRAIL_LEN = 18;          // how many trail samples to keep (longer comet)
 
   function spawnSquares() {
-    SQUARES = COLOR_ORDER.map((color) => {
+    // Fair start: every square launches in the SAME direction (a fixed diagonal,
+    // so it always has both velocity components and can round corners), and the
+    // four squares are SEPARATED along the start corridor rather than clustered.
+    // Diagonal heading down the first path step keeps the launch fair + lively.
+    const launch = launchDirection();
+
+    // Spread the squares out along the first stretch of the corridor.
+    const offsets = [-1.5, -0.5, 0.5, 1.5]; // in square-sizes, perpendicular-ish
+    SQUARES = COLOR_ORDER.map((color, i) => {
       const sq = createSquare(color);
       sq.isPlayer = color === STATE.selectedColor;
-      // Start clustered near the entry, with a randomized launch direction.
-      const jitter = SQUARE_SIZE * 0.6;
-      sq.x = MAZE.start.x + (rand() - 0.5) * jitter;
-      sq.y = MAZE.start.y + (rand() - 0.5) * jitter;
-      const a = rand() * Math.PI * 2;
-      sq.vx = Math.cos(a) * sq.speed;
-      sq.vy = Math.sin(a) * sq.speed;
+      // Separate them along the corridor direction so they don't all overlap.
+      const along = MAZE.path && MAZE.path.length > 1
+        ? stepDir(MAZE.path[0], MAZE.path[1]) : { x: 1, y: 0 };
+      const perp = { x: -along.y, y: along.x };
+      const spread = SQUARE_SIZE * 1.25;
+      sq.x = MAZE.start.x + perp.x * offsets[i] * spread * 0.5 + along.x * offsets[i] * spread;
+      sq.y = MAZE.start.y + perp.y * offsets[i] * spread * 0.5 + along.y * offsets[i] * spread;
+      // keep inside the start cell area / on open floor
+      sq.x = Math.max(SQUARE_SIZE, Math.min(view.w - SQUARE_SIZE, sq.x));
+      sq.y = Math.max(SQUARE_SIZE, Math.min(view.h - SQUARE_SIZE, sq.y));
+      sq.vx = launch.x * sq.speed;
+      sq.vy = launch.y * sq.speed;
       return sq;
     });
+  }
+
+  // Direction (unit vector) from cell a to cell b.
+  function stepDir(a, b) {
+    const dx = Math.sign(b.c - a.c), dy = Math.sign(b.r - a.r);
+    const d = Math.hypot(dx, dy) || 1;
+    return { x: dx / d, y: dy / d };
+  }
+
+  // A fair, shared launch direction: a 45° diagonal biased to head INTO the
+  // corridor (down the first path step), identical for all squares.
+  function launchDirection() {
+    let bx = 1, by = 1;
+    if (MAZE.path && MAZE.path.length > 1) {
+      const s = stepDir(MAZE.path[0], MAZE.path[1]);
+      // bias the diagonal toward the corridor's initial direction
+      bx = (s.x !== 0 ? s.x : 1);
+      by = (s.y !== 0 ? s.y : 1);
+    }
+    const d = Math.hypot(bx, by) || 1;
+    return { x: bx / d, y: by / d };
   }
 
   function updateSquares(dt) {
@@ -536,6 +917,10 @@
       moveAndBounce(sq, dt);
       // No self-rotation: squares do not spin on themselves. They move straight
       // and only change direction by reflecting off walls (handled above).
+
+      // Record the comet motion trail.
+      sq.trail.push({ x: sq.x, y: sq.y });
+      if (sq.trail.length > TRAIL_LEN) sq.trail.shift();
 
       // Pickup loot.
       tryPickup(sq);
@@ -565,11 +950,15 @@
   function moveAndBounce(sq, dt) {
     const half = SQUARE_SIZE / 2;
 
+    // A brick the square's OWN color shatters on contact, so try to break any
+    // brick it is currently overlapping before resolving wall collisions.
+    tryBreakBrick(sq);
+
     // --- X axis: move, and if we'd enter a wall, reflect vx (vertical wall) ---
     const nx = sq.x + sq.vx * dt;
-    if (sq.vx > 0 && isWallAtPixel(nx + half, sq.y)) {
+    if (sq.vx > 0 && isWallForSquare(nx + half, sq.y, sq)) {
       sq.vx = -sq.vx; bounceFx(sq);           // reflect off vertical wall
-    } else if (sq.vx < 0 && isWallAtPixel(nx - half, sq.y)) {
+    } else if (sq.vx < 0 && isWallForSquare(nx - half, sq.y, sq)) {
       sq.vx = -sq.vx; bounceFx(sq);
     } else {
       sq.x = nx;                              // no wall: advance straight
@@ -577,9 +966,9 @@
 
     // --- Y axis: move, and if we'd enter a wall, reflect vy (horizontal wall) ---
     const ny = sq.y + sq.vy * dt;
-    if (sq.vy > 0 && isWallAtPixel(sq.x, ny + half)) {
+    if (sq.vy > 0 && isWallForSquare(sq.x, ny + half, sq)) {
       sq.vy = -sq.vy; bounceFx(sq);           // reflect off horizontal wall
-    } else if (sq.vy < 0 && isWallAtPixel(sq.x, ny - half)) {
+    } else if (sq.vy < 0 && isWallForSquare(sq.x, ny - half, sq)) {
       sq.vy = -sq.vy; bounceFx(sq);
     } else {
       sq.y = ny;                              // no wall: advance straight
@@ -587,8 +976,9 @@
 
     // Safety clamp to keep the square on-screen (the border is solid wall, so
     // this only guards against numerical drift — it does NOT change vx/vy).
-    sq.x = Math.max(half, Math.min(view.w - half, sq.x));
-    sq.y = Math.max(half, Math.min(view.h - half, sq.y));
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
+    sq.x = Math.max(MAZE.offX + half, Math.min(MAZE.offX + mazeW - half, sq.x));
+    sq.y = Math.max(MAZE.offY + half, Math.min(MAZE.offY + mazeH - half, sq.y));
   }
 
   let _bounceCooldown = 0;
@@ -707,15 +1097,32 @@
     ctx.translate(sq.x, sq.y);
     ctx.rotate(sq.angle);
 
-    if (sq.isPlayer && !sq.eliminated) {
-      ctx.shadowColor = COLORS[sq.color]; ctx.shadowBlur = 14;
+    const r = 4; // slightly rounded corners
+    const base = COLORS[sq.color];
+
+    // Drop shadow beneath the body for lift off the floor (not an internal line).
+    if (!sq.eliminated) {
+      ctx.save();
+      ctx.globalAlpha = sq.opacity * 0.30;
+      ctx.fillStyle = '#000';
+      roundRect(-half + 1.5, -half + 3, SQUARE_SIZE, SQUARE_SIZE, r); ctx.fill();
+      ctx.restore();
     }
-    ctx.fillStyle = COLORS[sq.color];
-    ctx.fillRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE);
+
+    // Outer glow — strong for the player, soft for everyone else.
+    ctx.shadowColor = base;
+    ctx.shadowBlur = (sq.isPlayer && !sq.eliminated) ? 16 : 6;
+
+    // PLAIN SOLID body — one flat color, no gradient, no highlight, no internal
+    // lines or grid texture.
+    ctx.fillStyle = base;
+    roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE);
+
+    // A single clean dark outline for definition (an outer edge, not internal).
+    ctx.strokeStyle = shade(base, -0.5);
+    ctx.lineWidth = 1.5;
+    roundRect(-half, -half, SQUARE_SIZE, SQUARE_SIZE, r); ctx.stroke();
     ctx.restore();
 
     // Carried item icon (unrotated, above the square).
@@ -746,7 +1153,41 @@
     }
   }
 
+  // Comet trail: a smooth, glowing, tapering streak behind the square in its
+  // own color, drawn additively so overlapping segments bloom like light.
+  function drawTrail(sq) {
+    if (sq.eliminated || sq.finished || sq.trail.length < 2) return;
+    const half = SQUARE_SIZE / 2;
+    const base = COLORS[sq.color];
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalCompositeOperation = 'lighter';
+    // soft wide glow pass
+    for (let i = 1; i < sq.trail.length; i++) {
+      const a = sq.trail[i - 1], b = sq.trail[i];
+      const f = i / sq.trail.length;            // 0 (tail) -> 1 (near body)
+      ctx.globalAlpha = f * f * 0.22;
+      ctx.strokeStyle = base;
+      ctx.lineWidth = Math.max(1, half * 2.1 * f);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    // bright thin core pass
+    for (let i = 1; i < sq.trail.length; i++) {
+      const a = sq.trail[i - 1], b = sq.trail[i];
+      const f = i / sq.trail.length;
+      ctx.globalAlpha = f * 0.55;
+      ctx.strokeStyle = shade(base, 0.35);
+      ctx.lineWidth = Math.max(1, half * 0.9 * f);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   function drawSquares() {
+    // Trails underneath everything, then bodies (eliminated first).
+    for (const sq of SQUARES) drawTrail(sq);
     for (const sq of SQUARES) if (sq.eliminated) drawSquare(sq);
     for (const sq of SQUARES) if (!sq.eliminated) drawSquare(sq);
   }
@@ -770,23 +1211,22 @@
   function placeLoot() {
     LOOT = [];
     const open = listOpenCells();
-    // Avoid spawning right on top of the start cluster.
     const usable = open.filter(cell => {
       const ctr = cellCenter(cell.c, cell.r);
       return Math.hypot(ctr.x - MAZE.start.x, ctr.y - MAZE.start.y) > Math.max(MAZE.cellW, MAZE.cellH) * 1.5;
     });
-    // Shuffle (seeded).
     for (let i = usable.length - 1; i > 0; i--) {
       const j = Math.floor(rand() * (i + 1));
       [usable[i], usable[j]] = [usable[j], usable[i]];
     }
-    const count = Math.min(usable.length, 5 + Math.floor(rand() * 3)); // 5-7 items
-    for (let i = 0; i < count; i++) {
-      const cell = usable[i];
-      const ctr = cellCenter(cell.c, cell.r);
-      // ~55% knives, ~45% shields.
-      const type = rand() < 0.55 ? 'knife' : 'shield';
-      LOOT.push({ x: ctr.x, y: ctr.y, type, taken: false });
+    const picks = usable.slice(0, Math.min(usable.length, 2));
+    if (picks[0]) {
+      const ctr = cellCenter(picks[0].c, picks[0].r);
+      LOOT.push({ x: ctr.x, y: ctr.y, type: 'knife', taken: false });
+    }
+    if (picks[1]) {
+      const ctr = cellCenter(picks[1].c, picks[1].r);
+      LOOT.push({ x: ctr.x, y: ctr.y, type: 'shield', taken: false });
     }
   }
 
@@ -842,48 +1282,95 @@
    * MAZE RENDERING (fills the whole screen)
    * ========================================================= */
   function drawMaze() {
-    // Floor fills the entire screen first (no dark bg visible).
-    ctx.fillStyle = '#e9edf2';
+    // 1) BACKGROUND: one solid flat color over the whole screen (this also fills
+    //    the empty letterbox space above/below the centered square-cell maze).
+    ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, view.w, view.h);
 
-    // Floor tint checker for readability.
-    ctx.fillStyle = 'rgba(60,80,110,0.05)';
+    const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
+
+    // 2) FLOOR: one solid flat color, covering ONLY the maze area. No checker,
+    //    no grid, no cell lines.
+    ctx.fillStyle = FLOOR_COLOR;
+    ctx.fillRect(MAZE.offX, MAZE.offY, mazeW, mazeH);
+
+    // 3) WALLS: draw ONLY thin outline segments around OPEN corridor cells.
+    //    This makes the maze read as mostly open floor with dark separators,
+    //    instead of visually suggesting that wall cells are filled blocks.
+    const T = 4;
+    const inset = T / 2;
+    const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.cellH;
+    const isOpenCell = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
+    ctx.fillStyle = WALL_COLOR;
     for (let r = 0; r < MAZE.rows; r++) {
       for (let c = 0; c < MAZE.cols; c++) {
-        if (MAZE.grid[r][c] !== '#' && (r + c) % 2 === 0) {
-          ctx.fillRect(c * MAZE.cellW, r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
-        }
+        if (!isOpenCell(c, r)) continue;
+        const x = ox + c * cw, y = oy + r * ch;
+        if (!isOpenCell(c, r - 1)) ctx.fillRect(x, y - inset, cw, T);
+        if (!isOpenCell(c, r + 1)) ctx.fillRect(x, y + ch - inset, cw, T);
+        if (!isOpenCell(c - 1, r)) ctx.fillRect(x - inset, y, T, ch);
+        if (!isOpenCell(c + 1, r)) ctx.fillRect(x + cw - inset, y, T, ch);
       }
     }
 
-    // Walls.
-    for (const w of MAZE.walls) {
-      ctx.fillStyle = '#2b2f44';
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(w.x, w.y, w.w, 3); // top highlight
-    }
-
-    // Entry marker.
+    // Entry marker: a solid translucent tint + label (no grid).
     if (MAZE.start) {
-      ctx.fillStyle = 'rgba(46,204,113,0.30)';
+      ctx.fillStyle = 'rgba(46,204,113,0.28)';
       ctx.fillRect(MAZE.start.x - MAZE.cellW / 2, MAZE.start.y - MAZE.cellH / 2, MAZE.cellW, MAZE.cellH);
       ctx.fillStyle = '#2ecc71';
-      ctx.font = `bold ${Math.min(MAZE.cellW, MAZE.cellH) * 0.5}px monospace`;
+      ctx.font = `bold ${MAZE.cellW * 0.42}px monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('IN', MAZE.start.x, MAZE.start.y);
     }
-    // Exit marker (pulsing).
-    if (MAZE.exit) {
-      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
-      ctx.fillStyle = `rgba(255,215,0,${0.25 + 0.35 * pulse})`;
-      ctx.fillRect(MAZE.exit.x - MAZE.cellW / 2, MAZE.exit.y - MAZE.cellH / 2, MAZE.cellW, MAZE.cellH);
-      ctx.fillStyle = '#FFB000';
-      ctx.font = `bold ${Math.min(MAZE.cellW, MAZE.cellH) * 0.5}px monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('EX', MAZE.exit.x, MAZE.exit.y);
+    // Exit marker: a checkered finish flag filling the exit cell.
+    if (MAZE.exitCell) {
+      drawCheckeredFlag(MAZE.offX + MAZE.exitCell.c * MAZE.cellW, MAZE.offY + MAZE.exitCell.r * MAZE.cellH, MAZE.cellW, MAZE.cellH);
     }
     ctx.textBaseline = 'alphabetic';
+  }
+
+  // Draw a black/white checkered finish flag covering a cell rect.
+  function drawCheckeredFlag(x, y, w, h) {
+    const cols = 4, rows = 4;
+    const cw = w / cols, ch = h / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = ((r + c) % 2 === 0) ? '#101018' : '#f4f4f8';
+        ctx.fillRect(x + c * cw, y + r * ch, cw + 0.5, ch + 0.5);
+      }
+    }
+    // subtle pulsing glow ring so the finish reads at a glance
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 280);
+    ctx.strokeStyle = `rgba(255,215,0,${0.4 + 0.4 * pulse})`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+  }
+
+  // Draw the colored brick gates. Each unbroken brick fills its cell with a
+  // brick-textured block tinted its color; a brief flash plays when smashed.
+  function drawBricks() {
+    if (!BRICKS.length) return;
+    for (const b of BRICKS) {
+      if (b.broken) { if (b.hitFlash > 0) b.hitFlash = Math.max(0, b.hitFlash - 0.05); continue; }
+      // Skip if the flood has already swallowed this cell (flood draws over it).
+      if (FLOOD.sealed[b.r] && FLOOD.sealed[b.r][b.c]) continue;
+      const x = MAZE.offX + b.c * MAZE.cellW, y = MAZE.offY + b.r * MAZE.cellH;
+      const w = MAZE.cellW, h = MAZE.cellH;
+      const base = COLORS[b.color];
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300 + b.c + b.r);
+      // Solid flat colored block (this gate's color). NO mortar/grid/bevel lines.
+      ctx.fillStyle = base;
+      ctx.fillRect(x, y, w + 1, h + 1);
+      // A single soft glowing colored outline so it reads as a colored gate
+      // (one clean rim — not a grid).
+      ctx.save();
+      ctx.shadowColor = base;
+      ctx.shadowBlur = 8 + 6 * pulse;
+      ctx.strokeStyle = shade(base, 0.35);
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+      ctx.restore();
+    }
   }
 
   /* =========================================================
@@ -906,6 +1393,8 @@
     rand = mulberry32((Date.now() ^ (index * 0x9e3779b1)) >>> 0);
     PARTICLES = [];
     loadStage(index);
+    resetFlood();
+    resetBricks();
     spawnSquares();
     placeLoot();
     STATE.introTimer = 2.0; // countdown-ish intro
@@ -1044,7 +1533,7 @@
     if (STATE.introTimer <= 0) { STATE.current = 'RACE'; GameAudio.startMusic(); }
   }
   function drawStageIntro() {
-    drawMaze(); drawLoot(); drawSquares();
+    drawMaze(); drawFlood(); drawBricks(); drawLoot(); drawSquares();
     ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, view.w, view.h);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#FFD700'; ctx.font = 'bold 40px monospace';
@@ -1069,13 +1558,15 @@
 
     STATE.raceTimer += dt;
 
+    // Advance the blue flood wall first (it can seal cells behind squares),
+    // then move the squares with pure billiard physics.
+    updateFlood(dt);
     updateSquares(dt);
 
-    // 2-minute safety cap (the ONLY fallback): pure billiard motion has no
-    // guarantee of bouncing into the exit, so if a stage is still going after
-    // STAGE_TIME_LIMIT we place any remaining squares by how close they happen
-    // to be to the exit. This is not pathfinding — squares never steer toward
-    // the exit during play; this only stops a stage from running forever.
+    // Safety cap (rarely reached now that the flood squeezes squares to the
+    // exit): if a stage somehow still runs past STAGE_TIME_LIMIT, place any
+    // remaining squares by how close they happen to be to the exit. Not
+    // pathfinding — squares never steer; this only stops an infinite stage.
     if (STATE.raceTimer >= STAGE_TIME_LIMIT) {
       const remaining = SQUARES.filter(s => !s.finished && !s.eliminated);
       remaining.sort((a, b) => {
@@ -1101,6 +1592,8 @@
   }
   function drawRace() {
     drawMaze();
+    drawFlood();
+    drawBricks();
     drawLoot();
     drawSquares();
     drawParticles();

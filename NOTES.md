@@ -426,3 +426,17 @@ corridor floor, smaller solid squares.
 - User refinement applied: maze visual style keeps only corridor outline lines; no internal grid dividers are drawn inside open lanes.
 
 - User refinement applied: vertical dead space between horizontal corridor rows is compacted by about 70%, and the reclaimed space is redistributed into taller corridor lanes so rows sit closer together while corridors get slightly bigger.
+
+- Rolled back the broken row-compaction geometry refactor after it caused out-of-maze squares/items; returning to the last stable full-cell geometry before reattempting spacing changes more safely.
+
+- Safe Stage-1-only spacing trial: Stage 1 maze row count reduced from 17 to 11 so the empty vertical space between serpentine lanes is substantially reduced and that reclaimed space becomes taller corridors, without changing the overall rendering/physics system.
+
+- Stage 1 rebuilt to keep the same overall height while reducing blank lane-to-lane gaps: horizontal corridors now use two stacked open rows per lane, with fewer separator rows so the recovered vertical space makes the lanes taller instead of shrinking the maze.
+
+- Stage 1 refinement: turn connectors widened horizontally by using 3-cell openings at bends, so corners feel roomier; this also lets colored brick gates read as full lane blockers across the thicker-lane shape.
+
+- Stage 1 cleanup pass: connector openings normalized to 4-cell turn widths, and the start lane narrowed slightly at the far-right corner to make the launch area look cleaner and more intentional while preserving the thicker-lane concept.
+
+- Stage 1 refinement: turn connectors are now explicitly 2 cells wide by 2 cells tall.
+
+- Stage 1 refinement: brick gates are temporarily disabled for Stage 1 only, per user request.
