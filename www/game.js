@@ -511,6 +511,7 @@
     const localX = px - MAZE.offX;
     const localY = py - MAZE.offY;
     if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
+    if (STATE.stageIndex === 0) return !isInsideStage1Corridor(px, py, 0);
     const c = Math.floor(localX / MAZE.cellW);
     const r = Math.floor(localY / MAZE.cellH);
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
@@ -536,6 +537,10 @@
     const localX = px - MAZE.offX;
     const localY = py - MAZE.offY;
     if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
+    if (STATE.stageIndex === 0) {
+      if (!isInsideStage1Corridor(px, py, SQUARE_SIZE * 0.5)) return true;
+      return false;
+    }
     const c = Math.floor(localX / MAZE.cellW);
     const r = Math.floor(localY / MAZE.cellH);
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
@@ -719,7 +724,7 @@
       const pts = stage1PathPoints();
       if (!pts || pts.length < 2) return;
       const laneW = MAZE.cellH * 1.42;
-      const floodW = Math.max(1, laneW - WALL_THICKNESS * 2);
+      const floodW = Math.max(1, laneW - WALL_THICKNESS * 0.6);
       const frac = FLOOD.progress - Math.floor(FLOOD.progress);
       const upto = Math.min(MAZE.path.length - 1, FLOOD.front);
       const segPts = [];
@@ -1324,6 +1329,32 @@
       x: MAZE.offX + cell.c * MAZE.cellW + MAZE.cellW / 2,
       y: MAZE.offY + cell.r * MAZE.cellH + MAZE.cellH / 2
     }));
+  }
+
+
+  function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    if (len2 <= 1e-6) return Math.hypot(px - ax, py - ay);
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    const qx = ax + dx * t, qy = ay + dy * t;
+    return Math.hypot(px - qx, py - qy);
+  }
+
+  function stage1CorridorHalfWidth() {
+    return (MAZE.cellH * 1.42) * 0.5;
+  }
+
+  function isInsideStage1Corridor(px, py, pad) {
+    const pts = stage1PathPoints();
+    if (!pts || pts.length < 2) return false;
+    const half = stage1CorridorHalfWidth() - (pad || 0);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      if (pointToSegmentDistance(px, py, a.x, a.y, b.x, b.y) <= half) return true;
+    }
+    return false;
   }
 
   function drawStage1VisualMaze(ctx) {

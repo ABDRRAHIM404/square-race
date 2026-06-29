@@ -458,3 +458,7 @@ corridor floor, smaller solid squares.
 - Stage 1 corridor corners changed from rounded joins to sharp 90° corners by using butt caps + miter joins in the continuous-path visual renderer.
 
 - Stage 1 flood renderer now follows the same continuous path geometry and fills the corridor width horizontally instead of drawing as separate cell blocks.
+
+- Stage 1 collision logic now uses the same continuous thick-corridor geometry as the Stage 1 renderer, removing invisible walls between the visible floor edge and the old narrow cell-based corridor bounds.
+
+- Stage 1 flood rendering widened to nearly the full interior thick-corridor width so the blue wall visually fills the lane instead of leaving oversized side margins.
