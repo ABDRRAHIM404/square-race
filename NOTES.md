@@ -442,3 +442,19 @@ corridor floor, smaller solid squares.
 - Stage 1 refinement: brick gates are temporarily disabled for Stage 1 only, per user request.
 
 - Stage 1 behavior fix: stacked 2-row corridor bands are now treated as one fused movement lane for square positioning, so squares and the flood no longer get trapped cycling inside the upper/lower half of a thicker lane.
+
+- Reworked Stage 1 safely: restored single-row corridor logic for movement/flood, then thickened lanes in rendering only by visually enlarging open floor bands and shrinking apparent gaps between them.
+
+- Stage 1 visual thickening refined: horizontal corridor runs are now rendered as merged thick bands rather than thickened per-cell outlines, removing duplicate inner wall lines while keeping the single-path logic intact.
+
+- Stage 1 renderer switched to custom merged lane shapes: straight runs and turns are outlined as single thick corridor shapes instead of stitched from per-cell border fragments.
+
+- Reset to stable Stage 1 logic/rendering, then applied one minimal visual-only change: Stage 1 corridor floor bands are slightly overpainted above/below open rows to reduce the apparent dark separator gap without altering movement, flood, or path logic.
+
+- Added a Stage 1 visual-geometry layer: merged thick horizontal lane rectangles plus narrow vertical connector rectangles are now generated separately from gameplay logic so Stage 1 can be visually denser while keeping the stable one-cell path underneath.
+
+- Stage 1 visual architecture revised again: instead of stitched rectangles, the corridor is now rendered from the underlying Stage 1 path as one continuous thick stroked shape (outer wall stroke + inner floor stroke), while gameplay logic remains unchanged.
+
+- Stage 1 corridor corners changed from rounded joins to sharp 90° corners by using butt caps + miter joins in the continuous-path visual renderer.
+
+- Stage 1 flood renderer now follows the same continuous path geometry and fills the corridor width horizontally instead of drawing as separate cell blocks.

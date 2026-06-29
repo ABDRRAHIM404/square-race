@@ -306,23 +306,23 @@
     // PERFECT SQUARES (size = screenWidth/9) and the maze is taller now so it
     // fills most of the portrait screen; any leftover space is the centered,
     // background-colored letterbox. All 5 are validated single-path (S->E).
-    // 1 — thicker lanes with 2x2 turn connectors and no brick gates for now (9x17)
+    // 1 — horizontal serpentine (9x17)
     [
       '#########',
-      '#S.....##',
-      '#......##',
-      '#####..##',
+      '#S......#',
+      '#######.#',
       '#.......#',
+      '#.#######',
       '#.......#',
-      '##..#####',
-      '##......#',
+      '#######.#',
       '#.......#',
-      '#####..##',
+      '#.#######',
       '#.......#',
+      '#######.#',
       '#.......#',
-      '##..#####',
-      '##......#',
+      '#.#######',
       '#.......#',
+      '#######.#',
       '#E......#',
       '#########'
     ],
@@ -611,7 +611,6 @@
 
   function resetBricks() {
     BRICKS = [];
-    if (STATE.stageIndex === 0) return; // Stage 1: remove brick gates for now
     const path = MAZE.path;
     if (!path || path.length < 8) return;
     // Place bricks on interior path cells, evenly spaced, skipping cells near
@@ -697,7 +696,6 @@
         const nextAhead = MAZE.path[Math.min(aheadIdx + 1, MAZE.path.length - 1)];
         const ctr = cellCenter(ahead.c, ahead.r);
         sq.x = ctr.x; sq.y = ctr.y;
-        snapSquareToLaneBand(sq);
         // Re-aim along the corridor's forward direction but KEEP it a billiard
         // diagonal so it still bounces naturally (this is the wall shoving it,
         // not pathfinding — it only happens when the wall reaches the square).
@@ -715,15 +713,50 @@
 
   function drawFlood() {
     if (!MAZE.path.length) return;
+    const t = Date.now();
+
+    if (STATE.stageIndex === 0) {
+      const pts = stage1PathPoints();
+      if (!pts || pts.length < 2) return;
+      const laneW = MAZE.cellH * 1.42;
+      const floodW = Math.max(1, laneW - WALL_THICKNESS * 2);
+      const frac = FLOOD.progress - Math.floor(FLOOD.progress);
+      const upto = Math.min(MAZE.path.length - 1, FLOOD.front);
+      const segPts = [];
+      for (let i = 0; i <= upto; i++) segPts.push(pts[i]);
+      if (FLOOD.front < MAZE.path.length && pts[FLOOD.front]) {
+        const a = pts[FLOOD.front];
+        const b = pts[Math.min(FLOOD.front + 1, pts.length - 1)];
+        if (a && b) segPts.push({ x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac });
+      }
+      if (segPts.length >= 2) {
+        ctx.save();
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+        ctx.miterLimit = 2;
+        ctx.strokeStyle = FLOOD_COLOR;
+        ctx.lineWidth = floodW;
+        ctx.beginPath();
+        ctx.moveTo(segPts[0].x, segPts[0].y);
+        for (let i = 1; i < segPts.length; i++) ctx.lineTo(segPts[i].x, segPts[i].y);
+        ctx.stroke();
+
+        const pulse = 0.55 + 0.45 * Math.sin(t / 220);
+        const tail = segPts[segPts.length - 1];
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(140,130,255,${0.16 + 0.16 * pulse})`;
+        ctx.fillRect(tail.x - floodW * 0.18, tail.y - floodW * 0.18, floodW * 0.36, floodW * 0.36);
+        ctx.restore();
+      }
+      return;
+    }
+
     const w = MAZE.cellW, h = MAZE.cellH;
     const ox = MAZE.offX, oy = MAZE.offY;
-    const t = Date.now();
     const inset = WALL_THICKNESS * 0.5;
     const fw = Math.max(1, w - WALL_THICKNESS);
     const fh = Math.max(1, h - WALL_THICKNESS);
 
-    // One continuous solid strip inset inside the corridor so the maze outline
-    // remains visible and no internal cell separators appear inside the flood.
     ctx.fillStyle = FLOOD_COLOR;
     for (let i = 0; i < FLOOD.front; i++) {
       const cell = MAZE.path[i];
@@ -762,32 +795,6 @@
   // Visual-effect tuning.
   const SHIELD_FLASH_TIME = 0.5; // seconds for the blue shield ripple
 
-
-  function laneBandRows(r) {
-    if (STATE.stageIndex !== 0) return [r];
-    const grid = MAZE.grid || [];
-    if (r < 0 || r >= MAZE.rows) return [r];
-    if (!grid[r] || !grid[r].includes('.')) return [r];
-    const rows = [r];
-    if (r > 0 && grid[r - 1] && grid[r - 1].includes('.')) rows.push(r - 1);
-    if (r + 1 < MAZE.rows && grid[r + 1] && grid[r + 1].includes('.')) rows.push(r + 1);
-    return Array.from(new Set(rows)).sort((a, b) => a - b);
-  }
-
-  function laneBandCenterY(r) {
-    const rows = laneBandRows(r);
-    const ys = rows.map(rr => MAZE.offY + rr * MAZE.cellH + MAZE.cellH / 2);
-    return ys.reduce((a, b) => a + b, 0) / ys.length;
-  }
-
-  function snapSquareToLaneBand(sq) {
-    if (STATE.stageIndex !== 0) return;
-    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
-    const r = Math.max(0, Math.min(MAZE.rows - 1, Math.floor((sq.y - MAZE.offY) / MAZE.cellH)));
-    if (r < 0 || r >= MAZE.rows || c < 0 || c >= MAZE.cols) return;
-    if (MAZE.grid[r][c] === '#') return;
-    sq.y = laneBandCenterY(r);
-  }
 
   /* =========================================================
    * PARTICLES (death explosion fragments)
@@ -912,7 +919,6 @@
       sq.y = Math.max(SQUARE_SIZE, Math.min(view.h - SQUARE_SIZE, sq.y));
       sq.vx = launch.x * sq.speed;
       sq.vy = launch.y * sq.speed;
-      snapSquareToLaneBand(sq);
       return sq;
     });
   }
@@ -944,7 +950,6 @@
       if (sq.finished) continue;
 
       moveAndBounce(sq, dt);
-      snapSquareToLaneBand(sq);
       // No self-rotation: squares do not spin on themselves. They move straight
       // and only change direction by reflecting off walls (handled above).
 
@@ -1311,6 +1316,47 @@
   /* =========================================================
    * MAZE RENDERING (fills the whole screen)
    * ========================================================= */
+
+
+  function stage1PathPoints() {
+    if (STATE.stageIndex !== 0 || !MAZE.path || !MAZE.path.length) return null;
+    return MAZE.path.map(cell => ({
+      x: MAZE.offX + cell.c * MAZE.cellW + MAZE.cellW / 2,
+      y: MAZE.offY + cell.r * MAZE.cellH + MAZE.cellH / 2
+    }));
+  }
+
+  function drawStage1VisualMaze(ctx) {
+    const pts = stage1PathPoints();
+    if (!pts || pts.length < 2) return false;
+    const laneW = MAZE.cellH * 1.42;
+    const border = WALL_THICKNESS;
+
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 2;
+
+    // Outer dark border stroke
+    ctx.strokeStyle = WALL_COLOR;
+    ctx.lineWidth = laneW + border * 2;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    // Inner floor stroke
+    ctx.strokeStyle = FLOOR_COLOR;
+    ctx.lineWidth = laneW;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    ctx.restore();
+    return true;
+  }
+
   function drawMaze() {
     // 1) BACKGROUND: one solid flat color over the whole screen (this also fills
     //    the empty letterbox space above/below the centered square-cell maze).
@@ -1319,27 +1365,27 @@
 
     const mazeW = MAZE.cellW * MAZE.cols, mazeH = MAZE.cellH * MAZE.rows;
 
-    // 2) FLOOR: one solid flat color, covering ONLY the maze area. No checker,
-    //    no grid, no cell lines.
-    ctx.fillStyle = FLOOR_COLOR;
-    ctx.fillRect(MAZE.offX, MAZE.offY, mazeW, mazeH);
-
-    // 3) WALLS: draw ONLY thin outline segments around OPEN corridor cells.
-    //    This makes the maze read as mostly open floor with dark separators,
-    //    instead of visually suggesting that wall cells are filled blocks.
-    const T = 4;
-    const inset = T / 2;
-    const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.cellH;
-    const isOpenCell = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
-    ctx.fillStyle = WALL_COLOR;
-    for (let r = 0; r < MAZE.rows; r++) {
-      for (let c = 0; c < MAZE.cols; c++) {
-        if (!isOpenCell(c, r)) continue;
-        const x = ox + c * cw, y = oy + r * ch;
-        if (!isOpenCell(c, r - 1)) ctx.fillRect(x, y - inset, cw, T);
-        if (!isOpenCell(c, r + 1)) ctx.fillRect(x, y + ch - inset, cw, T);
-        if (!isOpenCell(c - 1, r)) ctx.fillRect(x - inset, y, T, ch);
-        if (!isOpenCell(c + 1, r)) ctx.fillRect(x + cw - inset, y, T, ch);
+    // 2) FLOOR + WALLS. Stage 1 uses a dedicated visual geometry layer
+    //    built from merged corridor bands; other stages keep the normal cell
+    //    rendering. Gameplay/path logic stays unchanged.
+    const stage1Custom = drawStage1VisualMaze(ctx);
+    if (!stage1Custom) {
+      ctx.fillStyle = FLOOR_COLOR;
+      ctx.fillRect(MAZE.offX, MAZE.offY, mazeW, mazeH);
+      const T = 4;
+      const inset = T / 2;
+      const ox = MAZE.offX, oy = MAZE.offY, cw = MAZE.cellW, ch = MAZE.cellH;
+      const isOpenCell = (c, r) => r >= 0 && c >= 0 && r < MAZE.rows && c < MAZE.cols && MAZE.grid[r][c] !== '#';
+      ctx.fillStyle = WALL_COLOR;
+      for (let r = 0; r < MAZE.rows; r++) {
+        for (let c = 0; c < MAZE.cols; c++) {
+          if (!isOpenCell(c, r)) continue;
+          const x = ox + c * cw, y = oy + r * ch;
+          if (!isOpenCell(c, r - 1)) ctx.fillRect(x, y - inset, cw, T);
+          if (!isOpenCell(c, r + 1)) ctx.fillRect(x, y + ch - inset, cw, T);
+          if (!isOpenCell(c - 1, r)) ctx.fillRect(x - inset, y, T, ch);
+          if (!isOpenCell(c + 1, r)) ctx.fillRect(x + cw - inset, y, T, ch);
+        }
       }
     }
 
