@@ -511,7 +511,11 @@
     const localX = px - MAZE.offX;
     const localY = py - MAZE.offY;
     if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
-    if (STATE.stageIndex === 0) return !isInsideStage1Corridor(px, py, 0);
+    if (STATE.stageIndex === 0) {
+      const idx = pathIndexForPoint(px, py);
+      if (idx >= 0 && idx < FLOOD.front) return true;
+      return !isInsideCurrentCorridor(px, py, 0);
+    }
     const c = Math.floor(localX / MAZE.cellW);
     const r = Math.floor(localY / MAZE.cellH);
     if (FLOOD.sealed[r] && FLOOD.sealed[r][c]) return true;
@@ -538,7 +542,10 @@
     const localY = py - MAZE.offY;
     if (localX < 0 || localY < 0 || localX >= MAZE.cellW * MAZE.cols || localY >= MAZE.cellH * MAZE.rows) return true;
     if (STATE.stageIndex === 0) {
-      if (!isInsideStage1Corridor(px, py, SQUARE_SIZE * 0.5)) return true;
+      const idx = pathIndexForPoint(px, py);
+      if (idx >= 0 && idx < FLOOD.front) return true;
+      if (!isInsideCurrentCorridor(px, py, SQUARE_SIZE * 0.5)) return true;
+      if (stageGateBlocking(px, py, sq)) return true;
       return false;
     }
     const c = Math.floor(localX / MAZE.cellW);
@@ -651,6 +658,7 @@
 
   // Path index of the cell a square currently occupies (-1 if off-path).
   function squarePathIndex(sq) {
+    if (STATE.stageIndex === 0) return pathIndexForPoint(sq.x, sq.y);
     const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
     const r = Math.floor((sq.y - MAZE.offY) / MAZE.cellH);
     for (let i = 0; i < MAZE.path.length; i++) {
@@ -721,7 +729,7 @@
     const t = Date.now();
 
     if (STATE.stageIndex === 0) {
-      const pts = stage1PathPoints();
+      const pts = currentPathPoints();
       if (!pts || pts.length < 2) return;
       const laneW = MAZE.cellH * 1.42;
       const floodW = Math.max(1, laneW - WALL_THICKNESS * 0.6);
@@ -1323,12 +1331,79 @@
    * ========================================================= */
 
 
-  function stage1PathPoints() {
-    if (STATE.stageIndex !== 0 || !MAZE.path || !MAZE.path.length) return null;
+
+  function currentCorridorHalfWidth() {
+    return STATE.stageIndex === 0 ? (MAZE.cellH * 1.42) * 0.5 : (MAZE.cellH - WALL_THICKNESS) * 0.5;
+  }
+
+  function currentPathPoints() {
+    if (!MAZE.path || !MAZE.path.length) return null;
     return MAZE.path.map(cell => ({
       x: MAZE.offX + cell.c * MAZE.cellW + MAZE.cellW / 2,
       y: MAZE.offY + cell.r * MAZE.cellH + MAZE.cellH / 2
     }));
+  }
+
+  function pointPathDistance(px, py, pts) {
+    if (!pts || pts.length < 2) return Infinity;
+    let best = Infinity;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      const d = pointToSegmentDistance(px, py, a.x, a.y, b.x, b.y);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  function isInsideCurrentCorridor(px, py, pad) {
+    const pts = currentPathPoints();
+    if (!pts || pts.length < 2) return false;
+    return pointPathDistance(px, py, pts) <= currentCorridorHalfWidth() - (pad || 0);
+  }
+
+  function pathIndexForPoint(px, py) {
+    if (!MAZE.path || !MAZE.path.length) return -1;
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < MAZE.path.length; i++) {
+      const ctr = cellCenter(MAZE.path[i].c, MAZE.path[i].r);
+      const d = Math.hypot(px - ctr.x, py - ctr.y);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  function stageGateInfos() {
+    return BRICKS.map(b => {
+      const idx = MAZE.path.findIndex(p => p.c === b.c && p.r === b.r);
+      if (idx < 0) return null;
+      const ctr = cellCenter(b.c, b.r);
+      const prev = MAZE.path[Math.max(0, idx - 1)] || MAZE.path[idx];
+      const next = MAZE.path[Math.min(MAZE.path.length - 1, idx + 1)] || MAZE.path[idx];
+      const dir = stepDir(prev, next);
+      const perp = { x: -dir.y, y: dir.x };
+      const half = currentCorridorHalfWidth();
+      return { brick: b, idx, ctr, dir, perp, half };
+    }).filter(Boolean);
+  }
+
+  function stageGateBlocking(px, py, sq) {
+    if (!BRICKS.length) return false;
+    const infos = stageGateInfos();
+    for (const g of infos) {
+      const relX = px - g.ctr.x, relY = py - g.ctr.y;
+      const along = relX * g.dir.x + relY * g.dir.y;
+      const across = relX * g.perp.x + relY * g.perp.y;
+      const gateHalfAlong = MAZE.cellW * 0.55;
+      if (Math.abs(along) <= gateHalfAlong && Math.abs(across) <= g.half) {
+        if (!g.brick.broken && g.brick.color !== sq.color) return true;
+      }
+    }
+    return false;
+  }
+
+  function stage1PathPoints() {
+    if (STATE.stageIndex !== 0) return null;
+    return currentPathPoints();
   }
 
 
@@ -1347,7 +1422,7 @@
   }
 
   function isInsideStage1Corridor(px, py, pad) {
-    const pts = stage1PathPoints();
+    const pts = currentPathPoints();
     if (!pts || pts.length < 2) return false;
     const half = stage1CorridorHalfWidth() - (pad || 0);
     for (let i = 1; i < pts.length; i++) {
@@ -1358,7 +1433,7 @@
   }
 
   function drawStage1VisualMaze(ctx) {
-    const pts = stage1PathPoints();
+    const pts = currentPathPoints();
     if (!pts || pts.length < 2) return false;
     const laneW = MAZE.cellH * 1.42;
     const border = WALL_THICKNESS;

@@ -462,3 +462,5 @@ corridor floor, smaller solid squares.
 - Stage 1 collision logic now uses the same continuous thick-corridor geometry as the Stage 1 renderer, removing invisible walls between the visible floor edge and the old narrow cell-based corridor bounds.
 
 - Stage 1 flood rendering widened to nearly the full interior thick-corridor width so the blue wall visually fills the lane instead of leaving oversized side margins.
+
+- Began replacing the ad-hoc Stage 1 hacks with reusable corridor-geometry helpers shared by rendering, collision, flood sealing checks, path indexing, and gate blocking, as groundwork for future maze variants.
