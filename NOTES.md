@@ -440,3 +440,5 @@ corridor floor, smaller solid squares.
 - Stage 1 refinement: turn connectors are now explicitly 2 cells wide by 2 cells tall.
 
 - Stage 1 refinement: brick gates are temporarily disabled for Stage 1 only, per user request.
+
+- Stage 1 behavior fix: stacked 2-row corridor bands are now treated as one fused movement lane for square positioning, so squares and the flood no longer get trapped cycling inside the upper/lower half of a thicker lane.

@@ -697,6 +697,7 @@
         const nextAhead = MAZE.path[Math.min(aheadIdx + 1, MAZE.path.length - 1)];
         const ctr = cellCenter(ahead.c, ahead.r);
         sq.x = ctr.x; sq.y = ctr.y;
+        snapSquareToLaneBand(sq);
         // Re-aim along the corridor's forward direction but KEEP it a billiard
         // diagonal so it still bounces naturally (this is the wall shoving it,
         // not pathfinding — it only happens when the wall reaches the square).
@@ -760,6 +761,33 @@
 
   // Visual-effect tuning.
   const SHIELD_FLASH_TIME = 0.5; // seconds for the blue shield ripple
+
+
+  function laneBandRows(r) {
+    if (STATE.stageIndex !== 0) return [r];
+    const grid = MAZE.grid || [];
+    if (r < 0 || r >= MAZE.rows) return [r];
+    if (!grid[r] || !grid[r].includes('.')) return [r];
+    const rows = [r];
+    if (r > 0 && grid[r - 1] && grid[r - 1].includes('.')) rows.push(r - 1);
+    if (r + 1 < MAZE.rows && grid[r + 1] && grid[r + 1].includes('.')) rows.push(r + 1);
+    return Array.from(new Set(rows)).sort((a, b) => a - b);
+  }
+
+  function laneBandCenterY(r) {
+    const rows = laneBandRows(r);
+    const ys = rows.map(rr => MAZE.offY + rr * MAZE.cellH + MAZE.cellH / 2);
+    return ys.reduce((a, b) => a + b, 0) / ys.length;
+  }
+
+  function snapSquareToLaneBand(sq) {
+    if (STATE.stageIndex !== 0) return;
+    const c = Math.floor((sq.x - MAZE.offX) / MAZE.cellW);
+    const r = Math.max(0, Math.min(MAZE.rows - 1, Math.floor((sq.y - MAZE.offY) / MAZE.cellH)));
+    if (r < 0 || r >= MAZE.rows || c < 0 || c >= MAZE.cols) return;
+    if (MAZE.grid[r][c] === '#') return;
+    sq.y = laneBandCenterY(r);
+  }
 
   /* =========================================================
    * PARTICLES (death explosion fragments)
@@ -884,6 +912,7 @@
       sq.y = Math.max(SQUARE_SIZE, Math.min(view.h - SQUARE_SIZE, sq.y));
       sq.vx = launch.x * sq.speed;
       sq.vy = launch.y * sq.speed;
+      snapSquareToLaneBand(sq);
       return sq;
     });
   }
@@ -915,6 +944,7 @@
       if (sq.finished) continue;
 
       moveAndBounce(sq, dt);
+      snapSquareToLaneBand(sq);
       // No self-rotation: squares do not spin on themselves. They move straight
       // and only change direction by reflecting off walls (handled above).
 
