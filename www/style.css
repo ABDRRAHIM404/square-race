@@ -1,31 +1,46 @@
-/* ---- Reset ---- */
+:root {
+  --safe-top: max(env(safe-area-inset-top), 16px);
+  --safe-right: max(env(safe-area-inset-right), 16px);
+  --safe-bottom: max(env(safe-area-inset-bottom), 16px);
+  --safe-left: max(env(safe-area-inset-left), 16px);
+  --app-bg: #111827;
+}
+
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
 }
 
-/* ---- Prevent scroll / bounce / zoom on mobile ---- */
-html, body {
+html,
+body {
   width: 100%;
   height: 100%;
+  margin: 0;
   overflow: hidden;
-  background: #1a1a2e;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  touch-action: none;
+  background: var(--app-bg);
 }
 
-/* ---- Canvas fills the screen ---- */
-canvas {
+body {
+  position: fixed;
+  inset: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-shell {
+  width: 100%;
+  height: 100%;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg);
+}
+
+#gameCanvas {
   display: block;
-  width: 100vw;
-  height: 100vh;
-  /* Respect notches / safe areas on modern phones */
-  width: 100dvw;
-  height: 100dvh;
-  background: #1a1a2e;
-  touch-action: none;
+  width: min(100%, calc((100vh - var(--safe-top) - var(--safe-bottom)) * 9 / 16));
+  height: min(100%, calc((100vw - var(--safe-left) - var(--safe-right)) * 16 / 9));
+  aspect-ratio: 9 / 16;
+  background: #0f172a;
 }

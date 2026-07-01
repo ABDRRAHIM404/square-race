@@ -1,11 +1,8 @@
 {
-  "appId": "com.mazerunners.game",
+  "appId": "com.mazerunners.app",
   "appName": "Maze Runners",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
-  },
-  "android": {
-    "allowMixedContent": true
   }
 }

@@ -1,25 +1,19 @@
 {
   "name": "maze-runners",
-  "version": "1.0.0",
-  "description": "Maze Runners — 4 colored squares bounce through full-screen mazes like billiard balls, grabbing knife/shield loot across 5 stages for the podium. Pure HTML5 Canvas + Vanilla JS, wrapped to Android with Capacitor.",
-  "scripts": {
-    "sync": "npx cap sync android",
-    "add:android": "npx cap add android"
-  },
-  "keywords": [
-    "game",
-    "maze",
-    "canvas",
-    "capacitor",
-    "android",
-    "html5"
-  ],
+  "version": "0.1.0",
+  "description": "Maze Runners - HTML5 Canvas + Capacitor mobile game",
+  "private": true,
   "license": "MIT",
+  "scripts": {
+    "start": "npx serve www",
+    "cap:add:android": "npx cap add android",
+    "cap:sync:android": "npx cap sync android"
+  },
   "dependencies": {
-    "@capacitor/android": "^6.1.0",
-    "@capacitor/core": "^6.1.0"
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.1.0"
+    "@capacitor/cli": "^8.4.1"
   }
 }
