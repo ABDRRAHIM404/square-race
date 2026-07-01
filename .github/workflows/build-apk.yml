@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Debug APK
 
 on:
   push:
@@ -6,47 +6,54 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 22.x
+          cache: npm
 
-      - name: Setup Java 17
+      - name: Verify Node.js version
+        run: |
+          node --version
+          npm --version
+          which node
+          node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 22) { throw new Error(`Node 22+ required, got ${process.version}`); }"
+
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install Node dependencies
-        run: npm install
-
-      - name: Add Capacitor Android platform
+      - name: Add Android platform
         run: npx cap add android
 
-      - name: Sync web assets to Android
-        run: npx cap sync android
+      - name: Verify Android SDK versions
+        run: |
+          grep -q "minSdkVersion = 24" android/variables.gradle
+          grep -q "compileSdkVersion = 36" android/variables.gradle
+          grep -q "targetSdkVersion = 36" android/variables.gradle
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x android/gradlew
+      - name: Sync Android project
+        run: npx cap sync android
 
       - name: Build debug APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug
 
-      - name: Upload APK artifact
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: maze-runners-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          path: android/app/build/outputs/apk/debug/*.apk
