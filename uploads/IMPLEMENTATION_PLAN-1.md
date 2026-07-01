@@ -56,6 +56,8 @@ snap-to-grid winding-corridor look described in the spec.
 **Build:**
 - `engine/physics.js`: 4 colored squares spawn at the start point, move at their speed tiers, reflect off
   outer boundary and corridor walls (billiard-style), frame-rate independent via `deltaTime`.
+- **Square-to-square collision**: squares physically collide and bounce off each other, same as any other
+  wall collision. Squares must never pass through one another.
 - Minimal `engine/race.js`: detects when a square reaches the exit, records finish order. No elimination,
   no loot, no bricks, no pursuing wall yet.
 - Minimal race loop wired to the Renderer from Phase 1 so this is visually watchable (not just console logs).
@@ -64,8 +66,9 @@ snap-to-grid winding-corridor look described in the spec.
 race loop.
 
 **Checkpoint:** Run the default maze. All 4 squares bounce correctly through the corridor using only
-straight-line billiard physics, with correct reflection off every wall, and all 4 eventually reach the exit
-in some order with placements recorded. No square passes through a wall. No square gets permanently stuck
+straight-line billiard physics, with correct reflection off every wall, correct bounce behavior when two
+squares collide with each other (no passing through), and all 4 eventually reach the exit in some order with
+placements recorded. No square passes through a wall or another square. No square gets permanently stuck
 against a wall.
 
 ---
@@ -89,22 +92,27 @@ purpose-built test mazes (in addition to the default maze) that make each mechan
 - Checkpoint: on a test maze, confirm a brick blocks/reflects squares before being touched, and permanently
   opens the path after being touched.
 
-**3c. Pursuing Wall**
-- Follows behind the pack at constant 20% of square speed.
-- Travels **along the corridor path itself** (advancing through the same corridor geometry from the maze
-  data, following every turn/branch/dead end in sequence) — not a straight-line sweep across the canvas.
+**3c. Pursuing Wall / Flood**
+- Advances through the corridor at constant 20% of square speed.
+- **Directional, exit-guided flood** — at every branch/turn, advances toward the exit along the maze's
+  start-to-exit path, not a blob expanding outward from the squares' start point.
+- **Axis-aware fill**: advances horizontally through horizontal corridor segments, vertically through
+  vertical segments, reading as a smooth continuous flood — not a visible block-by-block/grid-step
+  animation.
 - **Fills the full width of the corridor floor** as it advances — once its leading edge has passed a point,
   that entire corridor cross-section is sealed, not just a thin line.
 - Default behavior = acts exactly like a normal wall (squares bounce off the leading edge, no elimination)
   everywhere in the still-open corridor except:
 - Dead-end kill: only eliminates a square when that square is in a dead end (per maze data's dead-end
-  markers) and the wall's advancing front has sealed off the only way out, with no path left for the square.
-- Checkpoint: on a test maze with an open corridor and a separate dead-end branch — confirm (1) the wall's
-  leading edge visibly tracks the corridor's turns rather than moving in a straight line, (2) the filled
-  region behind the wall spans the full corridor width with no gaps, (3) a square touching the wall in the
-  still-open corridor just bounces off unharmed, (4) a square that ends up trapped in the dead-end branch is
-  eliminated once the wall seals it in, and (5) a square that exits a dead-end branch before the wall seals
-  it is NOT eliminated.
+  markers) and the flood's advancing front has sealed off the only way out, with no path left for the
+  square.
+- Checkpoint: on a test maze with an open corridor and a separate dead-end branch — confirm (1) the flood's
+  leading edge visibly advances toward the exit and tracks the corridor's axis at each segment rather than
+  expanding from the squares' spawn point or stepping block-by-block, (2) the filled region behind it spans
+  the full corridor width with no gaps, (3) a square touching the flood in the still-open corridor just
+  bounces off unharmed, (4) a square that ends up trapped in the dead-end branch is eliminated once the
+  flood seals it in, and (5) a square that exits a dead-end branch before the flood seals it is NOT
+  eliminated.
 
 **3d. Combine**
 - Run all three mechanics together on the default maze plus test mazes.

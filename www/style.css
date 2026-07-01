@@ -443,3 +443,35 @@ body {
 .hud-button {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
 }
+
+body.editor-open .app-shell {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+body.editor-open #gameCanvas {
+  width: min(100%, calc((100vh - var(--safe-top) - var(--safe-bottom) - 240px) * 9 / 16));
+  height: min(calc(100vh - var(--safe-top) - var(--safe-bottom) - 240px), calc((100vw - var(--safe-left) - var(--safe-right)) * 16 / 9));
+  min-height: 280px;
+  flex: 0 1 auto;
+}
+
+body.editor-open .editor-overlay {
+  position: static;
+  inset: auto;
+  width: 100%;
+  max-width: min(96vw, 560px);
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+body.editor-open .editor-panel {
+  width: 100%;
+  max-height: min(34vh, 230px);
+}

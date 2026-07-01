@@ -379,7 +379,7 @@ function playRaceEvents(app, previousPositions, now = performance.now()) {
 
 function drawRace(app) {
   const maze = app.mazes[app.stageIndex];
-  renderMaze(app.canvas, maze);
+  renderMaze(app.canvas, maze, { drawDynamicMarkers: false });
   renderRaceOverlays(app.canvas, maze, app.race);
   renderRacers(app.canvas, maze, app.race.racers);
 }
@@ -402,7 +402,7 @@ function startEditorTestPlay(app, maze, returnToEditor) {
 function editorTestFrame(app, now) {
   if (now < app.hitStopUntil) {
     app.lastTime = now;
-    renderMaze(app.canvas, app.editorTestMaze);
+    renderMaze(app.canvas, app.editorTestMaze, { drawDynamicMarkers: false });
     renderRaceOverlays(app.canvas, app.editorTestMaze, app.race);
     renderRacers(app.canvas, app.editorTestMaze, app.race.racers);
     app.animationFrame = requestAnimationFrame((nextNow) => editorTestFrame(app, nextNow));
@@ -413,7 +413,7 @@ function editorTestFrame(app, now) {
   app.lastTime = now;
   updateRace(app.race, deltaTime);
   playRaceEvents(app, [], now);
-  renderMaze(app.canvas, app.editorTestMaze);
+  renderMaze(app.canvas, app.editorTestMaze, { drawDynamicMarkers: false });
   renderRaceOverlays(app.canvas, app.editorTestMaze, app.race);
   renderRacers(app.canvas, app.editorTestMaze, app.race.racers);
 

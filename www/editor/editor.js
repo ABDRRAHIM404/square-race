@@ -18,6 +18,7 @@ const GRID = { cols: 15, rows: 27, cellSize: 24 };
 const NOW_FALLBACK = '2026-07-01T00:00:00.000Z';
 
 export function showMazeEditor({ overlay, canvas, onSaved, onCancel, sourceMaze = null, onTestPlay }) {
+  document.body?.classList.add('editor-open');
   const draft = sourceMaze ? mazeToDraft(sourceMaze) : createBlankMazeDraft();
   let activeTool = 'corridor';
   let drawing = false;
@@ -47,6 +48,7 @@ export function showMazeEditor({ overlay, canvas, onSaved, onCancel, sourceMaze 
   const message = overlay.querySelector('.editor-message');
   const estimate = overlay.querySelector('.editor-estimate');
   const boostToggle = overlay.querySelector('.speed-boost-toggle');
+  if (!boostToggle) throw new Error('Speed boost toggle failed to render');
   boostToggle.checked = draft.speedBoost;
   TOOLS.forEach((tool) => {
     const button = document.createElement('button');
@@ -347,8 +349,7 @@ function neighbors(cell) {
 }
 
 function clearCanvasHandlers(canvas) {
-  boostToggle.addEventListener('change', redraw);
-
+  document.body?.classList.remove('editor-open');
   canvas.onpointerdown = null;
   canvas.onpointermove = null;
   canvas.onpointerup = null;

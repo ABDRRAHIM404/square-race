@@ -48,6 +48,7 @@ export function updateRace(race, deltaTime) {
 
   recordFinishedRacers(race);
   resolveDeadEndWallKills(race);
+  recordSoleSurvivor(race);
   race.complete = race.placements.length === race.racers.length;
 }
 
@@ -164,6 +165,23 @@ function breakTouchedBricks(race, blockedCells) {
   updateDynamicSolids(race);
 }
 
+function recordSoleSurvivor(race) {
+  if (race.placements.length !== race.racers.length - 1) return;
+
+  const survivor = race.racers.find((racer) => !racer.finished && !racer.eliminated);
+  if (!survivor) return;
+
+  survivor.finished = true;
+  survivor.finishTime = race.elapsed;
+  survivor.placement = nextFinishPlacement(race);
+  race.placements.push({
+    racerId: survivor.id,
+    placement: survivor.placement,
+    time: survivor.finishTime,
+    status: 'finished'
+  });
+}
+
 function recordFinishedRacers(race) {
   const exitX = race.maze.exit.x + 0.5;
   const exitY = race.maze.exit.y + 0.5;
@@ -220,12 +238,15 @@ function nextEliminationPlacement(race) {
 }
 
 function createPursuingWall(maze) {
-  const distances = buildCorridorDistances(maze);
+  const path = buildStartToExitPath(maze);
+  const distances = new Map(path.map((cell, index) => [cellKey(cell.x, cell.y), index]));
   return {
     speed: WALL_SPEED,
     progress: 0,
+    path,
     distances,
-    filledCells: new Set()
+    filledCells: new Set(),
+    front: null
   };
 }
 
@@ -236,15 +257,18 @@ function updatePursuingWall(race, deltaTime) {
   const maxProgressBehindPack = Math.max(0, trailingDistance - 0.25);
   race.pursuingWall.progress = Math.min(
     race.pursuingWall.progress + race.pursuingWall.speed * deltaTime,
-    maxProgressBehindPack
+    maxProgressBehindPack,
+    Math.max(0, race.pursuingWall.path.length)
   );
   race.pursuingWall.filledCells = new Set();
 
-  race.pursuingWall.distances.forEach((distance, key) => {
-    if (distance < race.pursuingWall.progress) {
-      race.pursuingWall.filledCells.add(key);
+  race.pursuingWall.path.forEach((cell, index) => {
+    if (index + 1 <= race.pursuingWall.progress) {
+      race.pursuingWall.filledCells.add(cellKey(cell.x, cell.y));
     }
   });
+
+  race.pursuingWall.front = getPursuingWallFront(race.pursuingWall);
 }
 
 function getTrailingActiveDistance(race) {
@@ -259,32 +283,61 @@ function getTrailingActiveDistance(race) {
   return activeDistances.length === 0 ? Infinity : Math.min(...activeDistances);
 }
 
-function buildCorridorDistances(maze) {
+function getPursuingWallFront(wall) {
+  if (wall.path.length === 0 || wall.progress >= wall.path.length) return null;
+
+  const index = Math.floor(wall.progress);
+  const cell = wall.path[index];
+  const next = wall.path[Math.min(index + 1, wall.path.length - 1)];
+  return {
+    cell,
+    next,
+    fraction: wall.progress - index
+  };
+}
+
+function buildStartToExitPath(maze) {
   const open = new Set(maze.corridor.cells.map((cell) => cellKey(cell.x, cell.y)));
   const startKey = cellKey(maze.start.x, maze.start.y);
-  const distances = new Map([[startKey, 0]]);
+  const exitKey = cellKey(maze.exit.x, maze.exit.y);
+  const cameFrom = new Map();
   const queue = [{ x: maze.start.x, y: maze.start.y }];
+  cameFrom.set(startKey, null);
 
   for (let index = 0; index < queue.length; index += 1) {
     const cell = queue[index];
-    const distance = distances.get(cellKey(cell.x, cell.y));
-    const neighbors = [
-      { x: cell.x + 1, y: cell.y },
-      { x: cell.x - 1, y: cell.y },
-      { x: cell.x, y: cell.y + 1 },
-      { x: cell.x, y: cell.y - 1 }
-    ];
+    const key = cellKey(cell.x, cell.y);
+    if (key === exitKey) break;
 
-    neighbors.forEach((neighbor) => {
-      const key = cellKey(neighbor.x, neighbor.y);
-      if (open.has(key) && !distances.has(key)) {
-        distances.set(key, distance + 1);
+    getNeighbors(cell).forEach((neighbor) => {
+      const neighborKey = cellKey(neighbor.x, neighbor.y);
+      if (open.has(neighborKey) && !cameFrom.has(neighborKey)) {
+        cameFrom.set(neighborKey, key);
         queue.push(neighbor);
       }
     });
   }
 
-  return distances;
+  if (!cameFrom.has(exitKey)) return [{ x: maze.start.x, y: maze.start.y }];
+
+  const path = [];
+  let key = exitKey;
+  while (key) {
+    const [x, y] = key.split(',').map(Number);
+    path.push({ x, y });
+    key = cameFrom.get(key);
+  }
+
+  return path.reverse();
+}
+
+function getNeighbors(cell) {
+  return [
+    { x: cell.x + 1, y: cell.y },
+    { x: cell.x - 1, y: cell.y },
+    { x: cell.x, y: cell.y + 1 },
+    { x: cell.x, y: cell.y - 1 }
+  ];
 }
 
 function resolveDeadEndWallKills(race) {

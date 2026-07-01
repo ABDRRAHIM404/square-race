@@ -16,11 +16,12 @@ const COLORS = {
   label: '#f8fafc'
 };
 
-export function renderMaze(canvas, maze) {
+export function renderMaze(canvas, maze, options = {}) {
   const context = canvas.getContext('2d');
   const layout = resizeCanvas(canvas, maze.grid);
   const openCells = makeCellSet(maze.corridor.cells);
   const deadEndCells = makeCellSet(maze.deadEnds.flatMap((deadEnd) => deadEnd.cells));
+  const drawDynamicMarkers = options.drawDynamicMarkers !== false;
 
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = COLORS.background;
@@ -28,7 +29,7 @@ export function renderMaze(canvas, maze) {
 
   drawGrid(context, maze.grid, layout);
   drawFloor(context, maze.corridor.cells, deadEndCells, layout);
-  drawMarkers(context, maze, layout);
+  drawMarkers(context, maze, layout, drawDynamicMarkers);
   drawWalls(context, maze, openCells, layout);
   drawTitle(context, maze.name, layout);
 
@@ -47,6 +48,7 @@ export function renderRaceOverlays(canvas, maze, race) {
       const rect = cellRect({ x, y }, layout);
       context.fillRect(rect.x, rect.y, rect.size, rect.size);
     });
+    drawPursuingWallFront(context, race.pursuingWall.front, layout);
   }
 
   race.bricks?.forEach((brick) => {
@@ -63,6 +65,27 @@ export function renderRaceOverlays(canvas, maze, race) {
     const label = zone.type === 'knife' ? 'K' : zone.type === 'shield' ? 'H' : 'B';
     drawCellBadge(context, zone, layout, color, label, 0.52);
   });
+}
+
+function drawPursuingWallFront(context, front, layout) {
+  if (!front || front.fraction <= 0) return;
+
+  const rect = cellRect(front.cell, layout);
+  const fraction = Math.min(1, Math.max(0, front.fraction));
+  const dx = front.next.x - front.cell.x;
+  const dy = front.next.y - front.cell.y;
+
+  context.fillStyle = 'rgba(88, 28, 135, 0.58)';
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const width = rect.size * fraction;
+    const x = dx >= 0 ? rect.x : rect.x + rect.size - width;
+    context.fillRect(x, rect.y, width, rect.size);
+  } else {
+    const height = rect.size * fraction;
+    const y = dy >= 0 ? rect.y : rect.y + rect.size - height;
+    context.fillRect(rect.x, y, rect.size, height);
+  }
 }
 
 export function renderRacers(canvas, maze, racers) {
@@ -145,9 +168,11 @@ function drawFloor(context, cells, deadEndCells, layout) {
   });
 }
 
-function drawMarkers(context, maze, layout) {
+function drawMarkers(context, maze, layout, drawDynamicMarkers) {
   drawCellBadge(context, maze.start, layout, COLORS.start, 'S');
   drawCellBadge(context, maze.exit, layout, COLORS.exit, 'E');
+
+  if (!drawDynamicMarkers) return;
 
   maze.lootZones.forEach((zone) => {
     const color = zone.type === 'knife' ? COLORS.knife : zone.type === 'shield' ? COLORS.shield : '#a855f7';

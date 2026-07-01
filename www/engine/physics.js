@@ -1,10 +1,10 @@
 import { cellKey, makeCellSet } from './mazeFormat.js';
 
 export const RACER_COLORS = [
-  { id: 'yellow', color: '#facc15', speed: 3.15, angle: -1.726 },
-  { id: 'red', color: '#ef4444', speed: 2.95, angle: -1.724 },
-  { id: 'green', color: '#22c55e', speed: 2.75, angle: -1.722 },
-  { id: 'blue', color: '#3b82f6', speed: 2.55, angle: -1.720 }
+  { id: 'yellow', color: '#facc15', speed: 3.15, angle: -1.75 },
+  { id: 'red', color: '#ef4444', speed: 2.95, angle: -1.75 },
+  { id: 'green', color: '#22c55e', speed: 2.75, angle: -1.75 },
+  { id: 'blue', color: '#3b82f6', speed: 2.55, angle: -1.69 }
 ];
 
 const HALF_SIZE = 0.26;
@@ -55,11 +55,18 @@ export function setSolidCells(world, cells) {
 }
 
 export function stepRacers(world, racers, deltaTime) {
-  racers.forEach((racer) => {
-    if (!racer.finished && !racer.eliminated) {
-      stepRacer(world, racer, deltaTime);
-    }
-  });
+  const activeRacers = racers.filter((racer) => !racer.finished && !racer.eliminated);
+  const maxDistance = activeRacers.reduce((max, racer) => {
+    return Math.max(max, Math.hypot(racer.vx * deltaTime, racer.vy * deltaTime));
+  }, 0);
+  const steps = Math.max(1, Math.ceil(maxDistance / MAX_STEP));
+  const dt = deltaTime / steps;
+
+  for (let i = 0; i < steps; i += 1) {
+    activeRacers.forEach((racer) => moveRacerStep(world, racer, dt));
+    resolveRacerCollisions(activeRacers);
+    activeRacers.forEach(keepVelocityUseful);
+  }
 }
 
 export function isRacerInsideOpenCells(world, racer) {
@@ -70,16 +77,49 @@ export function racerCell(racer) {
   return { x: Math.floor(racer.x), y: Math.floor(racer.y) };
 }
 
-function stepRacer(world, racer, deltaTime) {
-  const distance = Math.hypot(racer.vx * deltaTime, racer.vy * deltaTime);
-  const steps = Math.max(1, Math.ceil(distance / MAX_STEP));
-  const dt = deltaTime / steps;
-
-  for (let i = 0; i < steps; i += 1) {
-    moveAxis(world, racer, 'x', racer.vx * dt);
-    moveAxis(world, racer, 'y', racer.vy * dt);
-    keepVelocityUseful(racer);
+function resolveRacerCollisions(racers) {
+  for (let i = 0; i < racers.length; i += 1) {
+    for (let j = i + 1; j < racers.length; j += 1) {
+      resolveRacerCollision(racers[i], racers[j]);
+    }
   }
+}
+
+function resolveRacerCollision(a, b) {
+  const minDistance = a.halfSize + b.halfSize;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance >= minDistance) return;
+
+  const nx = distance > 0 ? dx / distance : 1;
+  const ny = distance > 0 ? dy / distance : 0;
+  const overlap = minDistance - distance;
+
+  a.x -= nx * overlap * 0.5;
+  a.y -= ny * overlap * 0.5;
+  b.x += nx * overlap * 0.5;
+  b.y += ny * overlap * 0.5;
+
+  const relativeVx = a.vx - b.vx;
+  const relativeVy = a.vy - b.vy;
+  const velocityAlongNormal = relativeVx * nx + relativeVy * ny;
+
+  if (velocityAlongNormal <= 0) return;
+
+  const impulse = velocityAlongNormal;
+  a.vx -= impulse * nx;
+  a.vy -= impulse * ny;
+  b.vx += impulse * nx;
+  b.vy += impulse * ny;
+  normalizeVelocity(a);
+  normalizeVelocity(b);
+}
+
+function moveRacerStep(world, racer, deltaTime) {
+  moveAxis(world, racer, 'x', racer.vx * deltaTime);
+  moveAxis(world, racer, 'y', racer.vy * deltaTime);
 }
 
 function moveAxis(world, racer, axis, amount) {

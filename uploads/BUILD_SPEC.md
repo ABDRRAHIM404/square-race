@@ -86,6 +86,9 @@ or renderer-specific fields leaking into it.
   tiers unless testing shows they need retuning for corridor-style mazes).
 - Fully passive movement: constant velocity, straight-line travel, reflect off every wall (outer boundary +
   internal corridor walls + bricks + the pursuing wall where applicable).
+- **Squares physically collide with each other and bounce off one another** — true billiard-ball behavior.
+  Squares must never pass through one another; a collision between two squares reflects both, the same as
+  a collision with a wall.
 - Frame-rate independent — all movement uses `deltaTime`, no fixed-timestep assumptions.
 - No player steering at any point during a race.
 
@@ -105,30 +108,33 @@ or renderer-specific fields leaking into it.
   which point it breaks/disappears, opening that space permanently for the rest of the race.
 - Purely a geometry/pathing obstacle — does not eliminate squares on its own.
 
-### 4.4 Pursuing Wall (Safety Mechanism, Not a Pacing Mechanic)
-- A wall that follows behind the pack of squares, moving forward at a **constant speed equal to 20% of the
-  squares' movement speed**.
+### 4.4 Pursuing Wall / Flood (Safety Mechanism, Not a Pacing Mechanic)
+- A flood that advances through the corridor over time, moving forward at a **constant speed equal to 20%
+  of the squares' movement speed**.
 - Its speed is fixed and does **not** scale with maze length or target race time — it exists purely as a
   safety net against a square getting stuck bouncing forever in a pocket of the maze (an infinite loop),
   which is possible given fully passive billiard movement.
-- **It travels along the corridor path itself, not in a straight line across the maze.** The wall's leading
-  edge advances through the tunnel geometry — following every turn, branch, and dead end in sequence — the
-  same way a flood would move through the corridor from the start point onward. A straight-line sweep
-  (e.g. left-to-right across the whole canvas) is not correct behavior; the wall must track the maze's
-  actual corridor shape at all times, using the same corridor geometry defined in the maze data format
-  (Section 3).
-- **It fills the entire width of the corridor floor it has advanced through** — the wall is not a thin line
-  or partial-width object. Once the wall's leading edge has passed a point in the corridor, that entire
+- **It is a directional flood guided toward the exit, not a blob expanding outward from the squares' start
+  point.** At every point along the corridor, the flood advances in whichever direction moves it closer to
+  the exit along the maze's start-to-exit path (the same path-through-the-corridor logic used for path
+  validation in the editor, Section 7) — it does not expand uniformly in all open directions, and it is not
+  anchored to or centered on the squares' spawn location.
+- **Its fill direction follows the local corridor axis.** Through a horizontal corridor segment, the flood
+  advances horizontally; through a vertical segment, it advances vertically. The fill must not be a generic
+  block-by-block/grid-cell stepping animation — it should read as a smooth, continuous flood filling along
+  the corridor's actual shape and orientation, not discrete steps.
+- **It fills the entire width of the corridor floor** it has advanced through — the wall is not a thin line
+  or partial-width object. Once the flood's leading edge has passed a point in the corridor, that entire
   floor section (full corridor width, wall-to-wall) is filled/sealed behind it. This is what makes it
   correctly block off dead ends and pockets rather than leaving a gap a square could slip through.
 - **Default behavior everywhere in the open corridor: it acts exactly like a normal wall.** A square
-  touching the wall's leading edge in the open, still-traversable corridor simply bounces off, same as any
+  touching the flood's leading edge in the open, still-traversable corridor simply bounces off, same as any
   other wall — this is the common case and should not eliminate anyone.
-- **Elimination only happens in one specific situation**: a square is in a dead end, the pursuing wall's
-  advancing front has filled in behind it and sealed off the only way back out, and there is genuinely no
-  path left for that square other than being caught. Only then does contact eliminate the square. This
-  requires the engine to be able to detect "this square is in a dead end that the wall has now sealed" as a
-  distinct state from "square touched the wall's leading edge in an open, still-passable corridor."
+- **Elimination only happens in one specific situation**: a square is in a dead end, the flood's advancing
+  front has filled in behind it and sealed off the only way back out, and there is genuinely no path left
+  for that square other than being caught. Only then does contact eliminate the square. This requires the
+  engine to be able to detect "this square is in a dead end that the flood has now sealed" as a distinct
+  state from "square touched the flood's leading edge in an open, still-passable corridor."
 - Do not implement this as a general kill-on-touch mechanic — that would contradict the "just a safety net"
   purpose and would make races unpredictable in a way that undermines the maze design's control over pacing.
 
